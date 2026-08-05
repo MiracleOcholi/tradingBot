@@ -96,6 +96,36 @@ async def set_account_mode(body: AccountMode) -> dict:
     return await get_db().update_config(patch)
 
 
+class SignalAction(BaseModel):
+    action: str  # accept | reject
+
+
+@router.post("/signals/{signal_id}/action", dependencies=[Depends(require_auth)])
+async def signal_action(signal_id: str, body: SignalAction) -> dict:
+    """Web-app Accept/Reject — same lifecycle as the Telegram buttons (arms
+    execution on accept, updates the Telegram card, records the decision)."""
+    action = body.action.lower()
+    if action not in ("accept", "reject"):
+        raise HTTPException(400, "action must be accept or reject")
+    result = await signal_svc.handle_action(signal_id, action)
+    sig = await get_db().select("signals", f"id=eq.{signal_id}")
+    return {"result": result, "signal": sig[0] if sig else None}
+
+
+class SignalEdit(BaseModel):
+    field: str   # entry | sl | tp
+    value: float
+
+
+@router.post("/signals/{signal_id}/edit", dependencies=[Depends(require_auth)])
+async def signal_edit(signal_id: str, body: SignalEdit) -> dict:
+    """Web-app Edit: change one value; server recomputes the rest (1:4 held)."""
+    sig, msg = await signal_svc.apply_edit(signal_id, body.field.lower(), body.value)
+    if sig is None:
+        raise HTTPException(400, msg)
+    return {"result": msg, "signal": sig}
+
+
 @router.get("/analytics", dependencies=[Depends(require_auth)])
 async def analytics() -> dict:
     """Deterministic outcome stats + entry-improvement suggestions (Phase F)."""

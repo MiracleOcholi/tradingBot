@@ -38,8 +38,20 @@
   .chip.ok{color:var(--green); border-color:#1e4d38}
   .chip.warn{color:var(--amber); border-color:var(--amber-dim); text-shadow:var(--glow)}
   .chip.bad{color:var(--red); border-color:#5c2430}
-  main{display:grid; grid-template-columns:340px 1fr; gap:16px; padding:16px 22px; max-width:1500px; margin:0 auto}
-  @media(max-width:980px){ main{grid-template-columns:1fr} }
+  /* Three-pane cockpit: controls | chart | trade queue — graph and queue
+     stay visible together; panes stack progressively on smaller screens. */
+  main{display:grid; gap:16px; padding:16px 22px; max-width:1720px; margin:0 auto;
+       grid-template-columns:1fr; grid-template-areas:"mid" "queue" "left"}
+  .col-left{grid-area:left} .col-mid{grid-area:mid} .col-queue{grid-area:queue}
+  @media(min-width:981px){
+    main{grid-template-columns:320px minmax(0,1fr); grid-template-areas:"left mid" "left queue"}
+  }
+  @media(min-width:1400px){
+    main{grid-template-columns:290px minmax(0,1fr) 400px; grid-template-areas:"left mid queue"}
+    .col-queue .panel{position:sticky; top:16px; max-height:calc(100vh - 100px);
+                      display:flex; flex-direction:column}
+    .col-queue .feed{flex:1; max-height:none}
+  }
   .panel{
     background:linear-gradient(180deg, var(--panel) 0%, var(--panel2) 100%);
     border:1px solid var(--line); border-radius:6px; padding:14px 16px;
@@ -88,9 +100,24 @@
   .sig{
     display:grid; grid-template-columns:auto 1fr auto; gap:4px 12px; align-items:center;
     border:1px solid var(--line); border-left:3px solid var(--dim); border-radius:4px;
-    padding:8px 12px; font-size:12px;
+    padding:8px 12px; font-size:12px; cursor:pointer; transition:border-color .15s;
   }
+  .sig:hover{border-color:var(--amber-dim)}
+  .sig.sel{border-color:var(--amber-dim); box-shadow:var(--glow)}
   .sig.BUY{border-left-color:var(--green)} .sig.SELL{border-left-color:var(--red)}
+  .acts{grid-column:1/-1; display:flex; gap:8px; margin-top:4px}
+  .act{font-size:10px; padding:4px 12px; letter-spacing:.1em}
+  .act.take{color:var(--green); border-color:#1e4d38}
+  .act.pass{color:var(--red); border-color:#5c2430}
+  .editbox{grid-column:1/-1; border-top:1px dashed var(--line); margin-top:6px; padding-top:8px}
+  .fieldchips{display:flex; gap:6px; margin-bottom:8px}
+  .fchip{font-family:'IBM Plex Mono',monospace; font-size:10px; padding:4px 8px; border-radius:3px;
+         border:1px solid var(--line); color:var(--dim); cursor:pointer}
+  .fchip.on{color:var(--amber); border-color:var(--amber-dim); text-shadow:var(--glow)}
+  .editrow{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+  .preview{grid-column:1/-1; font-family:'IBM Plex Mono',monospace; font-size:10px;
+           color:var(--dim); margin-top:6px}
+  .preview b{color:var(--amber)}
   .sig .head{font-weight:600; letter-spacing:.08em}
   .sig .lv{grid-column:1/-1; color:var(--dim); font-size:11px}
   .st{font-family:'IBM Plex Mono',monospace; font-size:10px; padding:2px 8px; border-radius:2px; border:1px solid var(--line)}
@@ -141,7 +168,7 @@
 </header>
 
 <main>
-  <div class="col">
+  <div class="col col-left">
     <section class="panel">
       <h2>MASTER CONTROLS</h2>
       <div class="row">
@@ -198,7 +225,7 @@
     </section>
   </div>
 
-  <div class="col">
+  <div class="col col-mid">
     <section class="panel">
       <h2>LIVE CHART · MSnR LEVELS</h2>
       <div class="chartbar">
@@ -227,17 +254,19 @@
     </section>
 
     <section class="panel">
-      <h2>SIGNAL FEED</h2>
-      <div id="feed" class="feed"><div class="empty">NO SIGNALS YET</div></div>
-    </section>
-
-    <section class="panel">
       <h2>OUTCOME ANALYTICS · ENTRY LAB</h2>
       <div id="ana-stats" class="anagrid"></div>
       <div id="ana-sugg"></div>
       <div class="label" style="font-size:10px;margin-top:8px">
         DETERMINISTIC STATS ONLY — NO LLM IN THE DECISION PATH. SUGGESTIONS STAY WITHIN THE MSnR RULES.
       </div>
+    </section>
+  </div>
+
+  <div class="col col-queue">
+    <section class="panel">
+      <h2>TRADE QUEUE · TAP A ROW TO PROJECT IT ON THE CHART</h2>
+      <div id="feed" class="feed"><div class="empty">NO SIGNALS YET</div></div>
     </section>
   </div>
 </main>
@@ -298,14 +327,115 @@ function render(){
     el.classList.toggle("on");
   });
 
+  renderFeed();
+}
+
+// ---------------- trade queue (accept / pass / edit, non-blocking) ----------------
+let selectedSigId = localStorage.getItem("mav_sel") || null;
+let editingId = null, editField = "entry";
+
+function sigById(id){ return ((state&&state.signals)||[]).find(s=>s.id===id); }
+
+function renderFeed(){
+  if(!state || editingId) return;              // never clobber an open edit form
   const sigs = state.signals || [];
-  $("feed").innerHTML = sigs.length ? sigs.map(s => `
-    <div class="sig ${s.side}">
+  $("feed").innerHTML = sigs.length ? sigs.map(s => {
+    const pending = s.status==="PENDING";
+    return `
+    <div class="sig ${s.side}${s.id===selectedSigId?" sel":""}" data-sig="${s.id}">
       <span class="head mono">${s.symbol} ${s.side}${s.is_mock?" · MOCK":""}</span>
       <span class="mono" style="font-size:11px;color:var(--dim)">${new Date(s.created_at).toLocaleString()}</span>
       <span class="st ${s.status}">${s.status}</span>
       <span class="lv mono">E ${s.entry} · SL ${s.sl} · TP ${s.tp} · ${s.account_mode}</span>
-    </div>`).join("") : '<div class="empty">NO SIGNALS YET</div>';
+      ${pending?`<div class="acts">
+        <button class="act take" data-act="accept" data-id="${s.id}">✓ TAKE</button>
+        <button class="act pass" data-act="reject" data-id="${s.id}">✗ PASS</button>
+        <button class="act" data-editsig="${s.id}">✎ EDIT</button>
+      </div>`:""}
+      <div class="editbox" id="edit-${s.id}" style="display:none"></div>
+    </div>`;}).join("") : '<div class="empty">NO SIGNALS YET</div>';
+
+  document.querySelectorAll("[data-sig]").forEach(el => el.onclick = () => selectSignal(el.dataset.sig));
+  document.querySelectorAll("[data-act]").forEach(b => b.onclick = async (e) => {
+    e.stopPropagation();
+    const {act, id} = b.dataset;
+    b.disabled = true;
+    try{
+      const r = await post(`/api/signals/${id}/action`, {action: act});
+      toast(act==="accept" ? "✓ ACCEPTED — "+(r.result||"") : "✗ PASSED");
+      await refresh(); loadChart();
+    }catch(err){ b.disabled = false; }
+  });
+  document.querySelectorAll("[data-editsig]").forEach(b => b.onclick = (e) => {
+    e.stopPropagation(); openEdit(b.dataset.editsig);
+  });
+}
+
+function selectSignal(id){
+  const s = sigById(id);
+  if(!s) return;
+  selectedSigId = (selectedSigId===id) ? null : id;   // tap again to deselect
+  localStorage.setItem("mav_sel", selectedSigId||"");
+  if(selectedSigId && s.symbol !== chartSym){ chartSym = s.symbol; localStorage.setItem("mav_sym", chartSym); }
+  renderFeed(); loadChart();
+}
+
+// 1:4 preview mirror of the server math (server stays authoritative on APPLY)
+function previewPlan(s, field, v){
+  const buy = s.side==="BUY";
+  let e=+s.entry, sl=+s.sl, tp=+s.tp;
+  if(field==="entry"){ e=v; tp = buy ? e+4*(e-sl) : e-4*(sl-e); }
+  else if(field==="sl"){ sl=v; tp = buy ? e+4*(e-sl) : e-4*(sl-e); }
+  else { tp=v; const risk=Math.abs(tp-e)/4; sl = buy ? e-risk : e+risk; }
+  return {e, sl, tp};
+}
+
+function openEdit(id){
+  const s = sigById(id);
+  if(!s) return;
+  editingId = id; editField = "entry";
+  const box = $("edit-"+id);
+  const draw = () => {
+    const cur = {entry:s.entry, sl:s.sl, tp:s.tp}[editField];
+    box.style.display = "";
+    box.innerHTML = `
+      <div class="fieldchips">
+        ${["entry","sl","tp"].map(f=>`<span class="fchip ${f===editField?"on":""}" data-f="${f}">${f.toUpperCase()} ${ {entry:s.entry,sl:s.sl,tp:s.tp}[f] }</span>`).join("")}
+      </div>
+      <div class="editrow">
+        <input id="editval-${id}" type="number" step="any" value="${cur}" style="width:130px">
+        <button class="act" id="apply-${id}">APPLY — OTHERS RECOMPUTE (1:4)</button>
+        <button class="act" id="cancel-${id}">CANCEL</button>
+      </div>
+      <div class="preview" id="prev-${id}"></div>`;
+    box.onclick = (e) => e.stopPropagation();
+    box.querySelectorAll("[data-f]").forEach(c => c.onclick = (e) => {
+      e.stopPropagation(); editField = c.dataset.f; draw();
+    });
+    const inp = $("editval-"+id);
+    const prev = () => {
+      const v = parseFloat(inp.value);
+      if(isNaN(v)){ $("prev-"+id).textContent = ""; return; }
+      const p = previewPlan(s, editField, v);
+      $("prev-"+id).innerHTML =
+        `→ preview: E <b>${p.e.toFixed(4)}</b> · SL <b>${p.sl.toFixed(4)}</b> · TP <b>${p.tp.toFixed(4)}</b>`;
+    };
+    inp.oninput = prev; prev();
+    inp.onkeydown = (e) => { if(e.key==="Enter") $("apply-"+id).click(); };
+    $("apply-"+id).onclick = async (e) => {
+      e.stopPropagation();
+      const v = parseFloat(inp.value);
+      if(isNaN(v)){ toast("ENTER A NUMBER"); return; }
+      try{
+        const r = await post(`/api/signals/${id}/edit`, {field: editField, value: v});
+        editingId = null;
+        toast("✏️ "+(r.result||"UPDATED"));
+        await refresh(); loadChart();
+      }catch(err){ /* toast already shown by post() */ }
+    };
+    $("cancel-"+id).onclick = (e) => { e.stopPropagation(); editingId = null; renderFeed(); };
+  };
+  draw();  // the feed row already contains the (hidden) editbox — just fill it
 }
 
 async function refresh(){
@@ -389,6 +519,14 @@ function drawChart(){
   // include levels near the visible range so lines don't vanish at the edge
   const levels = (chartData.levels||[]).filter(lv => lv.price > lo-(hi-lo)*0.25 && lv.price < hi+(hi-lo)*0.25);
   for(const lv of levels){ lo = Math.min(lo, lv.price); hi = Math.max(hi, lv.price); }
+  // selected trade projection: make sure entry/SL/TP and the order block fit
+  const selSig = sigById(selectedSigId);
+  const proj = selSig && selSig.symbol===chartSym ? selSig : null;
+  if(proj){
+    for(const p of [proj.entry, proj.sl, proj.tp]){ lo=Math.min(lo,+p); hi=Math.max(hi,+p); }
+    const ob = proj.order_block||{};
+    if(ob.high){ lo=Math.min(lo,+ob.low); hi=Math.max(hi,+ob.high); }
+  }
   const span = (hi-lo)||1;
   const y = p => PAD_Y + (hi-p)/span * (H-2*PAD_Y);
   const cw = (W-PAD_R)/candles.length;
@@ -416,6 +554,16 @@ function drawChart(){
     ctx.fillText(tag, W-PAD_R+6, yy-4);
   }
 
+  // selected-trade order block zone (behind candles)
+  if(proj && proj.order_block && proj.order_block.high){
+    const ob = proj.order_block;
+    const yTop = y(+ob.high), yBot = y(+ob.low);
+    ctx.fillStyle = "rgba(255,179,71,0.10)";
+    ctx.fillRect(0, yTop, W-PAD_R, Math.max(yBot-yTop, 2));
+    ctx.strokeStyle = "rgba(255,179,71,0.35)"; ctx.lineWidth = 1;
+    ctx.strokeRect(0, yTop, W-PAD_R, Math.max(yBot-yTop, 2));
+  }
+
   // candles (last one = forming, drawn translucent)
   candles.forEach((c,i)=>{
     const x = i*cw + cw/2, up = c.c>=c.o;
@@ -429,6 +577,24 @@ function drawChart(){
     ctx.fillRect(x-bw/2, Math.min(yo,yc), bw, Math.max(Math.abs(yc-yo),1));
   });
   ctx.globalAlpha = 1;
+
+  // selected-trade lines on top: ENTRY amber, SL red, TP green
+  if(proj){
+    const lines = [
+      ["ENTRY", +proj.entry, "255,179,71", []],
+      ["SL",    +proj.sl,    "255,93,93",  [6,4]],
+      ["TP",    +proj.tp,    "61,220,132", [6,4]],
+    ];
+    ctx.font = "bold 10px 'IBM Plex Mono',monospace";
+    for(const [tag, price, col, dash] of lines){
+      const yy = y(price);
+      ctx.strokeStyle = `rgba(${col},0.95)`; ctx.lineWidth = 1.8; ctx.setLineDash(dash);
+      ctx.beginPath(); ctx.moveTo(0,yy); ctx.lineTo(W-PAD_R,yy); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = `rgb(${col})`;
+      ctx.fillText(`${tag} ${price}`, 8, yy-5);
+    }
+  }
 }
 
 window.addEventListener("resize", ()=>{ if(chartData) drawChart(); });

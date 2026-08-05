@@ -176,6 +176,18 @@
       <div class="row"><span class="label">DASHBOARD KEY</span>
         <input id="auth" type="password" placeholder="optional"></div>
       <div class="label" style="font-size:10px">Stored locally; sent as Bearer on control actions.</div>
+      <div class="row" style="border-top:1px dashed var(--line); padding-top:12px">
+        <span class="label">DERIV TOKEN</span>
+        <select id="tok-name" style="background:#0a1122;color:var(--text);border:1px solid var(--line);border-radius:3px;font-size:11px;padding:5px">
+          <option value="deriv_token_demo">DEMO</option>
+          <option value="deriv_token_live">LIVE</option>
+        </select>
+      </div>
+      <div class="row">
+        <input id="tok-value" type="password" placeholder="paste token" style="width:100%">
+      </div>
+      <div class="row"><button id="btn-token">STORE ENCRYPTED</button></div>
+      <div class="label" style="font-size:10px">Encrypted at rest (Fernet). Never echoed back.</div>
     </section>
   </div>
 
@@ -312,6 +324,13 @@ $("btn-watch").onclick = async () => {
   await post("/api/config", {watchlist:[...watchSel]}); toast("WATCHLIST APPLIED"); refresh();
 };
 $("auth").value = localStorage.getItem("mav_key") || "";
+$("btn-token").onclick = async () => {
+  const v = $("tok-value").value.trim();
+  if(!v){ toast("PASTE A TOKEN FIRST"); return; }
+  await post("/api/secrets", {name: $("tok-name").value, value: v});
+  $("tok-value").value = "";
+  toast("TOKEN STORED (ENCRYPTED)");
+};
 
 // ---------------- chart ----------------
 let chartSym = localStorage.getItem("mav_sym") || "R_10";

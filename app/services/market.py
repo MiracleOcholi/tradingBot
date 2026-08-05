@@ -67,7 +67,8 @@ class MarketService:
         self.trackers: dict[tuple[str, str], SNRTracker] = {}
         self.cursor: dict[tuple[str, str], datetime] = {}
         self.deriv: DerivClient | None = None
-        self.strategy = None  # StrategyService, wired by the watcher
+        self.strategy = None   # StrategyService, wired by the watcher
+        self.execution = None  # ExecutionService, wired by the watcher
         self.candles_processed = 0
         self._dirty_cursors: set[str] = set()
         self._lock = asyncio.Lock()
@@ -112,6 +113,10 @@ class MarketService:
             settings.deriv_app_id, self.symbols, self.on_candle,
             on_history_done=self.on_history_done,
         )
+        if self.execution is not None:
+            self.deriv.on_tick = self.execution.on_tick
+            self.deriv.on_contract = self.execution.on_contract
+            await self.execution.load()
         await self.deriv.run()
 
     # ---------------------------------------------------------------- ingest

@@ -105,8 +105,15 @@ async def handle_action(signal_id: str, action: str) -> str:
     if action == "accept":
         sig = await db.update_signal(signal_id, {"status": "ACCEPTED", "awaiting_edit_field": None})
         await db.record_decision(signal_id, "ACCEPT")
-        note = ("🟢 <b>Accepted.</b> (Phase A mock — execution arms in Phase D)"
-                if sig["is_mock"] else "🟢 <b>Accepted — arming virtual pending order.</b>")
+        if sig["is_mock"]:
+            note = "🟢 <b>Accepted.</b> (mock signal — nothing armed)"
+        else:
+            from app.execution.emulated_pending import get_execution
+            cfg = await db.get_config()
+            await get_execution().arm(sig)
+            note = "🟢 <b>Accepted — virtual pending order ARMED at entry.</b>"
+            if not cfg.get("kill_switch"):
+                note += "\n⚠️ Kill switch is OFF — the order will be cancelled at touch unless you arm it."
         await tg.update_signal_card(sig, note, keyboard={"inline_keyboard": []})
         return "Accepted"
 

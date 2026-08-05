@@ -30,19 +30,24 @@ _state = {"started_at": None, "last_tick": None, "ticks": 0, "last_error": None}
 
 
 def status() -> dict:
+    from app.execution.emulated_pending import get_execution
     return {
         **_state,
         "market": get_market().status(),
         "strategy": get_strategy().status(),
+        "execution": get_execution().status(),
     }
 
 
 async def run() -> None:
+    from app.execution.emulated_pending import get_execution
     _state["started_at"] = datetime.now(timezone.utc).isoformat()
     log.info("watcher started")
-    market, strategy = get_market(), get_strategy()
+    market, strategy, execution = get_market(), get_strategy(), get_execution()
     market.strategy = strategy
+    market.execution = execution
     strategy.market = market
+    execution.market = market
     market_task = asyncio.create_task(market.run(), name="market")
     try:
         await _housekeeping()

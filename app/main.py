@@ -53,9 +53,14 @@ app.include_router(webhook_router)
 @app.get("/health")
 async def health() -> JSONResponse:
     """Keep-alive target for the Cloudflare Worker cron."""
+    from app.services import crypto
+
     return JSONResponse({
         "status": "ok" if _schema_status.get("ok") else "degraded",
         "schema": _schema_status,
+        "encryption": crypto.key_status(),
+        "telegram_configured": get_settings().telegram_configured,
+        "deriv_app_id_set": bool(get_settings().deriv_app_id),
         "watcher": watcher.status(),
         "env": get_settings().app_env,
     })

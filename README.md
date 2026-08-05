@@ -46,8 +46,10 @@ cycles — levels, state machines, virtual orders, reminders reload on boot.
    **Dashboard login**: the web app is gated — first login is
    `admin` / `default`; change both immediately in the ACCESS panel
    (stored as PBKDF2 hashes in Supabase; 5 failed attempts → 60s lockout).
-   Set `ENCRYPTION_KEY` so sessions survive restarts. `DASHBOARD_PASSWORD`
-   is optional — a static bearer key for scripts/curl only.
+   Set `ENCRYPTION_KEY` so sessions survive restarts — a Fernet key is ideal,
+   but any secret of 16+ chars works (it is stretched with SHA-256). Never
+   change it once tokens are stored, or they must be re-entered.
+   `DASHBOARD_PASSWORD` is optional — a static bearer key for scripts/curl.
 3. **Telegram webhook** —
    `https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<app>.onrender.com/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>`
 4. **Keep-alive** — deploy `worker/keepalive-worker.js` to Cloudflare with the

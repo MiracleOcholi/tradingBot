@@ -9,8 +9,8 @@ from pydantic import BaseModel
 
 from app.config import WATCHLIST, get_settings
 from app.services import auth as auth_svc
+from app.services import crypto, watcher
 from app.services import signals as signal_svc
-from app.services import watcher
 from app.services.deriv import GRANULARITY
 from app.services.market import get_market
 from app.services.supabase import get_db
@@ -186,22 +186,38 @@ class SecretIn(BaseModel):
 async def store_secret(body: SecretIn) -> dict:
     """Store a Deriv account token encrypted-at-rest (Fernet, ENCRYPTION_KEY).
     The plaintext is never persisted or echoed back."""
-    from app.services import crypto
-
     if body.name not in ("deriv_token_demo", "deriv_token_live"):
         raise HTTPException(400, "unknown secret name")
     if not body.value.strip():
         raise HTTPException(400, "empty value")
     try:
         encrypted = crypto.encrypt(body.value.strip())
-    except RuntimeError as e:
-        raise HTTPException(500, str(e)) from e
-    await get_db().upsert(
-        "secrets",
-        {"name": body.name, "value_encrypted": encrypted, "updated_at": "now()"},
-        on_conflict="name",
-    )
+    except crypto.SecretsUnavailable as e:
+        raise HTTPException(400, str(e)) from e
+    try:
+        await get_db().upsert(
+            "secrets",
+            {"name": body.name, "value_encrypted": encrypted, "updated_at": "now()"},
+            on_conflict="name",
+        )
+    except Exception as e:
+        log.exception("storing %s failed", body.name)
+        raise HTTPException(502, f"Could not save to the database: {e}") from e
     return {"stored": body.name}
+
+
+@router.get("/secrets", dependencies=[Depends(require_auth)])
+async def list_secrets() -> dict:
+    """Which Deriv tokens are stored (names + timestamps only, never values)."""
+    rows = await get_db().select("secrets", "order=name.asc")
+    return {
+        "stored": [
+            {"name": r["name"], "updated_at": r.get("updated_at")}
+            for r in rows
+            if r["name"].startswith("deriv_token_")
+        ],
+        "encryption": crypto.key_status(),
+    }
 
 
 @router.post("/mock-signal", dependencies=[Depends(require_auth)])

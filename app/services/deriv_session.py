@@ -119,24 +119,36 @@ class DerivSession:
                 return acc.get("account_id")
         return None
 
-    async def mint_otp(self, client: httpx.AsyncClient, account_id: str) -> str | None:
+    async def mint_socket_url(self, client: httpx.AsyncClient, account_id: str) -> str | None:
+        """Ask for a socket for this account.
+
+        Despite the path name, the endpoint returns the fully-formed
+        WebSocket URL (`{"data": {"url": "wss://…"}}`) rather than a bare
+        OTP to assemble — confirmed against the live API. A bare OTP is
+        still accepted as a fallback in case that changes.
+        """
         r = await client.post(
             f"{REST_BASE}/options/accounts/{account_id}/otp",
             headers=self._headers(), json={},
         )
         r.raise_for_status()
         body = r.json()
-        otp = _find_key(
-            body, "otp", "one_time_password", "otp_code", "ws_otp",
-            "code", "token", "access_token", "value",
-        )
-        if not otp:
-            # No published schema, so when the expected field is absent we
-            # record the response SHAPE — key names and value types only,
-            # never values, since one of them is the credential itself.
-            self.otp_response_shape = describe_shape(body)
-            log.error("OTP field not found; response shape: %s", self.otp_response_shape)
-        return str(otp) if otp else None
+
+        url = _find_key(body, "url", "ws_url", "websocket_url")
+        if url and str(url).startswith(("ws://", "wss://")):
+            return str(url)
+
+        otp = _find_key(body, "otp", "one_time_password", "otp_code", "ws_otp", "code")
+        if otp:
+            segment = "demo" if self.demo else "real"
+            return f"{WS_BASE}/{segment}?otp={otp}"
+
+        # No published schema: record the response SHAPE — key names and
+        # value types only, never values, since one of them is the
+        # credential itself.
+        self.otp_response_shape = describe_shape(body)
+        log.error("no socket URL or OTP in the response; shape: %s", self.otp_response_shape)
+        return None
 
     async def websocket_url(self) -> str | None:
         """Full URL for the current-generation socket, or None if it cannot
@@ -158,9 +170,9 @@ class DerivSession:
                     )
                     return None
                 self.account_id = account_id
-                otp = await self.mint_otp(client, account_id)
-                if not otp:
-                    self.last_error = "OTP missing from the response"
+                socket_url = await self.mint_socket_url(client, account_id)
+                if not socket_url:
+                    self.last_error = "no socket URL in the response"
                     return None
         except httpx.HTTPStatusError as e:
             self.last_error = f"{e.response.status_code} from {e.request.url.path}: {e.response.text[:200]}"
@@ -170,8 +182,7 @@ class DerivSession:
             return None
 
         self.last_error = None
-        segment = "demo" if self.demo else "real"
-        return f"{WS_BASE}/{segment}?otp={otp}"
+        return socket_url
 
     def status(self) -> dict:
         return {

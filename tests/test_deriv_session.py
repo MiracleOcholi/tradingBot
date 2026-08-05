@@ -15,7 +15,10 @@ ACCOUNTS = {
 
 
 def transport(accounts=ACCOUNTS, otp_payload=None, otp_status=200):
-    otp_payload = otp_payload if otp_payload is not None else {"data": {"otp": "OTP-XYZ"}}
+    otp_payload = otp_payload if otp_payload is not None else {
+        "data": {"url": "wss://api.derivws.com/trading/v1/options/ws/demo?otp=OTP-XYZ"},
+        "meta": {"endpoint": "/x", "method": "POST", "timing": 5},
+    }
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/otp"):
@@ -72,32 +75,40 @@ def test_no_matching_account_returns_none():
 
 
 # ---------------------------------------------------------------- full flow
-async def test_builds_demo_websocket_url(patched):
+async def test_uses_the_url_the_api_returns(patched):
+    """The endpoint returns a complete socket URL, not a bare OTP."""
     patched()
     s = DerivSession("app-id", "pat", demo=True)
     url = await s.websocket_url()
-    assert url == f"{WS_BASE}/demo?otp=OTP-XYZ"
+    assert url == "wss://api.derivws.com/trading/v1/options/ws/demo?otp=OTP-XYZ"
     assert s.account_id == "DOT93085490"
     assert s.last_error is None
 
 
-async def test_builds_real_websocket_url(patched):
+async def test_real_account_selected_for_live(patched):
     patched()
     s = DerivSession("app-id", "pat", demo=False)
-    assert await s.websocket_url() == f"{WS_BASE}/real?otp=OTP-XYZ"
+    await s.websocket_url()
+    assert s.account_id == "ROT91793017"
 
 
-async def test_otp_at_top_level_also_accepted(patched):
+async def test_bare_otp_still_supported_as_fallback(patched):
     patched(otp_payload={"otp": "FLAT"})
     s = DerivSession("app-id", "pat", demo=True)
     assert await s.websocket_url() == f"{WS_BASE}/demo?otp=FLAT"
 
 
-async def test_missing_otp_is_reported_not_guessed(patched):
+async def test_non_websocket_url_is_rejected(patched):
+    patched(otp_payload={"data": {"url": "https://not-a-socket"}})
+    s = DerivSession("app-id", "pat", demo=True)
+    assert await s.websocket_url() is None
+
+
+async def test_missing_url_is_reported_not_guessed(patched):
     patched(otp_payload={"data": {}})
     s = DerivSession("app-id", "pat", demo=True)
     assert await s.websocket_url() is None
-    assert "OTP missing" in s.last_error
+    assert "no socket URL" in s.last_error
 
 
 async def test_http_error_is_reported(patched):
@@ -144,3 +155,9 @@ async def test_alternate_otp_field_names_are_found(patched):
     s = DerivSession("app-id", "pat", demo=True)
     url = await s.websocket_url()
     assert url.endswith("otp=ALT")
+
+
+async def test_url_field_wins_over_otp_field(patched):
+    patched(otp_payload={"data": {"url": "wss://x/y?otp=A", "otp": "B"}})
+    s = DerivSession("app-id", "pat", demo=True)
+    assert await s.websocket_url() == "wss://x/y?otp=A"

@@ -42,9 +42,12 @@ cycles — levels, state machines, virtual orders, reminders reload on boot.
    build `pip install -r requirements.txt` · start
    `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1` ·
    health check `/health` · free plan. Env vars: every name in
-   `.env.example` plus `PYTHON_VERSION=3.12.8`. Set `DASHBOARD_PASSWORD` —
-   without it the whole `/api` surface (signals, trades, analytics, controls)
-   is public.
+   `.env.example` plus `PYTHON_VERSION=3.12.8`.
+   **Dashboard login**: the web app is gated — first login is
+   `admin` / `default`; change both immediately in the ACCESS panel
+   (stored as PBKDF2 hashes in Supabase; 5 failed attempts → 60s lockout).
+   Set `ENCRYPTION_KEY` so sessions survive restarts. `DASHBOARD_PASSWORD`
+   is optional — a static bearer key for scripts/curl only.
 3. **Telegram webhook** —
    `https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<app>.onrender.com/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>`
 4. **Keep-alive** — deploy `worker/keepalive-worker.js` to Cloudflare with the

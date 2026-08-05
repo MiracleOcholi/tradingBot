@@ -148,11 +148,78 @@
   footer{padding:10px 22px; color:var(--dim); font-size:10px; letter-spacing:.15em; text-align:center}
   #toast{
     position:fixed; bottom:20px; right:20px; background:var(--panel); border:1px solid var(--amber-dim);
-    color:var(--amber); padding:10px 16px; border-radius:4px; font-size:12px; display:none; box-shadow:var(--glow);
+    color:var(--amber); padding:10px 16px; border-radius:4px; font-size:12px; box-shadow:var(--glow);
+    opacity:0; transform:translateY(14px); pointer-events:none;
+    transition:opacity .25s ease, transform .25s cubic-bezier(.2,.8,.3,1.15);
   }
+  #toast.show{opacity:1; transform:none}
+
+  /* ---------- motion & delight (disabled for prefers-reduced-motion) ------ */
+  @keyframes fadeUp{from{opacity:0; transform:translateY(12px)} to{opacity:1; transform:none}}
+  @keyframes pulseGlow{0%,100%{box-shadow:0 0 0 rgba(255,159,28,0)} 50%{box-shadow:var(--glow)}}
+  @keyframes blipPulse{0%,100%{opacity:1} 50%{opacity:.45}}
+  @keyframes floaty{0%,100%{transform:translateY(0)} 50%{transform:translateY(-3px)}}
+  .panel{animation:fadeUp .5s ease both}
+  .col-left .panel:nth-of-type(1){animation-delay:.03s}
+  .col-left .panel:nth-of-type(2){animation-delay:.09s}
+  .col-left .panel:nth-of-type(3){animation-delay:.15s}
+  .col-left .panel:nth-of-type(4){animation-delay:.21s}
+  .col-mid .panel:nth-of-type(1){animation-delay:.06s}
+  .col-mid .panel:nth-of-type(2){animation-delay:.14s}
+  .col-queue .panel{animation-delay:.10s}
+  .sig{animation:fadeUp .3s ease both}
+  header img{animation:floaty 5s ease-in-out infinite}
+  .chip.ok{animation:blipPulse 2.6s ease-in-out infinite}
+  button{transition:box-shadow .18s ease, transform .12s ease, background .18s ease}
+  button:hover{transform:translateY(-1px)}
+  button:active{transform:translateY(0) scale(.98)}
+  .sym,.fchip,.tf{transition:color .15s, border-color .15s, text-shadow .2s}
+  .st,.chip{transition:color .2s, border-color .2s}
+  .editbox{animation:fadeUp .25s ease both}
+  input, select{transition:border-color .15s, box-shadow .2s}
+  input:focus{box-shadow:0 0 8px rgba(255,159,28,.25)}
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation:none !important; transition:none !important}
+  }
+
+  /* ---------------------------- login gate -------------------------------- */
+  .login-overlay{
+    position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center;
+    background:rgba(6,10,19,.88); backdrop-filter:blur(7px);
+    opacity:1; transition:opacity .35s ease;
+  }
+  .login-overlay.hidden{opacity:0; pointer-events:none}
+  .login-card{
+    width:min(360px, 92vw); padding:34px 30px 28px; border-radius:8px; text-align:center;
+    background:linear-gradient(180deg, var(--panel) 0%, var(--panel2) 100%);
+    border:1px solid var(--amber-dim); animation:fadeUp .45s ease both, pulseGlow 3.5s ease-in-out infinite;
+  }
+  .login-card img{width:56px; height:56px; filter:drop-shadow(0 0 10px rgba(255,159,28,.7));
+                  animation:floaty 4s ease-in-out infinite}
+  .login-card h1{font-size:18px; letter-spacing:.4em; color:var(--amber); margin:12px 0 2px; text-shadow:var(--glow)}
+  .login-card .sub{font-size:10px; color:var(--dim); letter-spacing:.25em; margin-bottom:22px}
+  .login-card input{width:100%; margin-bottom:12px; padding:10px 12px; font-size:13px; text-align:center;
+                    letter-spacing:.1em}
+  .login-card button{width:100%; padding:11px; font-size:12px; letter-spacing:.25em; margin-top:4px}
+  .login-err{min-height:16px; font-size:11px; color:var(--red); letter-spacing:.08em; margin-top:10px}
+  .login-hint{font-size:9px; color:var(--dim); letter-spacing:.15em; margin-top:14px}
+  .shake{animation:shake .4s}
+  @keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-7px)}40%{transform:translateX(7px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
 </style>
 </head>
 <body>
+<div id="login" class="login-overlay hidden">
+  <div class="login-card">
+    <img src="/logo.svg" alt="">
+    <h1>MAVERICK</h1>
+    <div class="sub">RESTRICTED FLIGHT DECK · AUTHENTICATE</div>
+    <input id="lg-user" type="text" placeholder="CALLSIGN" autocomplete="username">
+    <input id="lg-pass" type="password" placeholder="ACCESS CODE" autocomplete="current-password">
+    <button id="lg-btn">AUTHENTICATE →</button>
+    <div id="lg-err" class="login-err"></div>
+    <div class="login-hint">FIRST FLIGHT: admin / default — CHANGE IT IMMEDIATELY IN THE ACCESS PANEL</div>
+  </div>
+</div>
 <header>
   <img src="/logo.svg" alt="Maverick">
   <div>
@@ -164,6 +231,7 @@
     <span id="chip-kill" class="chip">KILL —</span>
     <span id="chip-watch" class="chip">WATCHER —</span>
     <span id="chip-rot" class="chip" style="display:none">🔑 ROTATION OVERDUE</span>
+    <button id="btn-logout" class="chip" style="cursor:pointer; background:none">EJECT ⏏</button>
   </div>
 </header>
 
@@ -207,9 +275,14 @@
 
     <section class="panel">
       <h2>ACCESS</h2>
-      <div class="row"><span class="label">DASHBOARD KEY</span>
-        <input id="auth" type="password" placeholder="optional"></div>
-      <div class="label" style="font-size:10px">Stored locally; sent as Bearer on control actions.</div>
+      <div class="label" style="font-size:10px; margin-bottom:8px">CHANGE LOGIN — do this on first flight; the default is public knowledge.</div>
+      <div class="row"><span class="label">CURRENT CODE</span>
+        <input id="cr-cur" type="password" autocomplete="current-password"></div>
+      <div class="row"><span class="label">NEW CALLSIGN</span>
+        <input id="cr-user" type="text" placeholder="(keep current)"></div>
+      <div class="row"><span class="label">NEW CODE</span>
+        <input id="cr-new" type="password" placeholder="min 8 chars" autocomplete="new-password"></div>
+      <div class="row"><button id="btn-creds">UPDATE CREDENTIALS</button></div>
       <div class="row" style="border-top:1px dashed var(--line); padding-top:12px">
         <span class="label">DERIV TOKEN</span>
         <select id="tok-name" style="background:#0a1122;color:var(--text);border:1px solid var(--line);border-radius:3px;font-size:11px;padding:5px">
@@ -280,17 +353,44 @@ let state = null;
 let watchSel = new Set();
 
 const $ = id => document.getElementById(id);
-const toast = m => { const t=$("toast"); t.textContent=m; t.style.display="block";
-                     clearTimeout(t._h); t._h=setTimeout(()=>t.style.display="none", 3200); };
-const authHeaders = () => {
-  const k = ($("auth") && $("auth").value) || localStorage.getItem("mav_key") || "";
-  if ($("auth") && $("auth").value) localStorage.setItem("mav_key", $("auth").value);
-  return k ? {"Authorization":"Bearer "+k, "Content-Type":"application/json"}
-           : {"Content-Type":"application/json"};
-};
-$("auth") && ($("auth").onchange = () => { refresh(); loadChart(); loadAnalytics(); });
+const toast = m => { const t=$("toast"); t.textContent=m; t.classList.add("show");
+                     clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"), 3200); };
+
+// ---------------- auth: login gate + session token ----------------
+let token = localStorage.getItem("mav_token") || "";
+const authHeaders = () => token
+  ? {"Authorization":"Bearer "+token, "Content-Type":"application/json"}
+  : {"Content-Type":"application/json"};
+
+function showLogin(){ $("login").classList.remove("hidden"); setTimeout(()=>$("lg-user").focus(), 60); }
+function hideLogin(){ $("login").classList.add("hidden"); }
+
+async function doLogin(){
+  const u = $("lg-user").value.trim(), p = $("lg-pass").value;
+  if(!u || !p){ $("lg-err").textContent = "ENTER CALLSIGN AND ACCESS CODE"; return; }
+  $("lg-btn").disabled = true; $("lg-err").textContent = "";
+  try{
+    const r = await fetch("/api/login", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({username:u, password:p})});
+    if(!r.ok){
+      $("lg-err").textContent = ((await r.json()).detail || "ACCESS DENIED").toUpperCase();
+      const card = document.querySelector(".login-card");
+      card.classList.remove("shake"); void card.offsetWidth; card.classList.add("shake");
+      return;
+    }
+    const data = await r.json();
+    token = data.token; localStorage.setItem("mav_token", token);
+    $("lg-pass").value = "";
+    hideLogin();
+    toast(data.default_password ? "⚠️ DEFAULT CODE ACTIVE — CHANGE IT IN THE ACCESS PANEL" : "WELCOME BACK, MAVERICK");
+    refresh(); loadChart(); loadAnalytics();
+  } finally { $("lg-btn").disabled = false; }
+}
+
 async function post(path, body){
   const r = await fetch(path, {method:"POST", headers:authHeaders(), body:body?JSON.stringify(body):null});
+  if(r.status===401){ showLogin(); throw new Error(401); }
   if(!r.ok){ toast("ERR "+r.status+" · "+((await r.json()).detail||"")); throw new Error(r.status); }
   return r.json();
 }
@@ -441,7 +541,7 @@ function openEdit(id){
 async function refresh(){
   try{
     const r = await fetch("/api/state", {headers: authHeaders()});
-    if(r.status===401){ $("chip-watch").textContent="LOCKED — SET DASHBOARD KEY"; $("chip-watch").className="chip warn"; return; }
+    if(r.status===401){ showLogin(); return; }
     if(r.ok){ state = await r.json(); render(); }
   }catch(e){ /* keep last render */ }
 }
@@ -471,7 +571,20 @@ $("btn-save").onclick = async () => {
 $("btn-watch").onclick = async () => {
   await post("/api/config", {watchlist:[...watchSel]}); toast("WATCHLIST APPLIED"); refresh();
 };
-$("auth").value = localStorage.getItem("mav_key") || "";
+$("lg-btn").onclick = doLogin;
+$("lg-pass").onkeydown = e => { if(e.key==="Enter") doLogin(); };
+$("lg-user").onkeydown = e => { if(e.key==="Enter") $("lg-pass").focus(); };
+$("btn-logout").onclick = () => {
+  token = ""; localStorage.removeItem("mav_token");
+  toast("EJECTED — SESSION CLEARED"); showLogin();
+};
+$("btn-creds").onclick = async () => {
+  const cur = $("cr-cur").value, nu = $("cr-user").value.trim(), np = $("cr-new").value;
+  if(!cur || !np){ toast("FILL CURRENT + NEW CODE"); return; }
+  await post("/api/auth/change", {current_password: cur, new_username: nu, new_password: np});
+  $("cr-cur").value = $("cr-user").value = $("cr-new").value = "";
+  toast("✓ CREDENTIALS UPDATED — USE THEM ON NEXT LOGIN");
+};
 $("btn-token").onclick = async () => {
   const v = $("tok-value").value.trim();
   if(!v){ toast("PASTE A TOKEN FIRST"); return; }

@@ -2,7 +2,7 @@
 
 Human-in-the-loop trading assistant for Deriv synthetic indices, built on the
 **MSnR (Malaysian Support & Resistance)** methodology. One FastAPI process
-(Koyeb free tier) serving a cockpit-HUD dashboard, a Telegram signal loop
+(Render free tier) serving a cockpit-HUD dashboard, a Telegram signal loop
 (Accept / Reject / Edit), and a background watcher that runs the MSnR engine —
 **fully deterministic, no LLM anywhere in the trade decision path**.
 
@@ -14,7 +14,8 @@ PDF is the law. Project decisions live in `HANDOFF-V2.md`.
 ```
 FastAPI (single process, 512MB budget)
 ├── GET  /            cockpit dashboard (dark gunmetal · amber HUD)
-├── GET  /health      keep-alive target (Cloudflare Worker cron */5)
+├── GET  /health      keep-alive target (Cloudflare Worker cron */5 — Render
+│                     free spins down after ~15 min idle)
 ├── POST /telegram    Telegram webhook (X-Telegram-Bot-Api-Secret-Token)
 ├── /api/*            dashboard state + controls
 └── asyncio watcher   reminders → (B) Deriv candles + SNR → (C) state machines
@@ -36,9 +37,11 @@ cycles — levels, state machines, virtual orders, reminders reload on boot.
 1. **Database** — open the Supabase SQL Editor and run `db/schema.sql`, then
    `db/seed.sql` (idempotent; seed uses `ON CONFLICT DO NOTHING`). The app
    only *verifies* at startup (`app/bootstrap.py`) — API keys can't run DDL.
-2. **Env vars** — copy `.env.example` → `.env` (local) or set in Koyeb.
+2. **Deploy** — Render: New + → Blueprint → this repo (`render.yaml`), or a
+   manual web service with the same build/start commands. Env vars: copy the
+   names from `.env.example` into the Render dashboard.
 3. **Telegram webhook** —
-   `https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<app>.koyeb.app/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>`
+   `https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<app>.onrender.com/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>`
 4. **Keep-alive** — deploy `worker/keepalive-worker.js` to Cloudflare with the
    `*/5 * * * *` cron (see `worker/wrangler.toml`).
 

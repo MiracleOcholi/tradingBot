@@ -1,0 +1,35 @@
+# Render blueprint — deploy with "New +" → "Blueprint" pointing at this repo,
+# or create the web service manually with the same commands.
+services:
+  - type: web
+    name: maverick
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: APP_ENV
+        value: prod
+      # Set these in the Render dashboard (sync: false keeps them out of the repo):
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: DERIV_APP_ID
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false

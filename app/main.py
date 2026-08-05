@@ -1,5 +1,5 @@
 """Maverick — single FastAPI process: dashboard + /telegram webhook + /api +
-/health + background asyncio watcher (Koyeb free tier, 0.1 vCPU / 512MB)."""
+/health + background asyncio watcher (Render free tier, 512MB budget)."""
 from __future__ import annotations
 
 import asyncio

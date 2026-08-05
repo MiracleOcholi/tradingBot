@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
 from app.config import WATCHLIST, get_settings
+from app.services import auth as auth_svc
 from app.services import signals as signal_svc
 from app.services import watcher
 from app.services.deriv import GRANULARITY
@@ -19,11 +20,54 @@ router = APIRouter(prefix="/api")
 
 
 def require_auth(authorization: str = Header(default="")) -> None:
-    """Bearer check for ALL /api endpoints (reads included — signals, trades
-    and analytics are private trading data); open when no password is set."""
+    """ALL /api endpoints require a valid session token from /api/login
+    (default admin/default until changed). DASHBOARD_PASSWORD, if set, is
+    also accepted as a static bearer key for scripts/curl."""
+    token = authorization.removeprefix("Bearer ").strip()
     pw = get_settings().dashboard_password
-    if pw and authorization != f"Bearer {pw}":
-        raise HTTPException(status_code=401, detail="unauthorized")
+    if pw and token and token == pw:
+        return
+    if auth_svc.verify_token(token):
+        return
+    raise HTTPException(status_code=401, detail="unauthorized")
+
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+@router.post("/login")
+async def login(body: LoginIn) -> dict:
+    ok, msg = await auth_svc.verify_login(get_db(), body.username.strip(), body.password)
+    if not ok:
+        raise HTTPException(401, msg)
+    return {
+        "token": auth_svc.issue_token(body.username.strip()),
+        "default_password": await auth_svc.is_default_password(get_db()),
+    }
+
+
+class CredsIn(BaseModel):
+    current_password: str
+    new_username: str = ""
+    new_password: str
+
+
+@router.post("/auth/change", dependencies=[Depends(require_auth)])
+async def change_credentials(body: CredsIn) -> dict:
+    db = get_db()
+    current_user = await auth_svc.current_username(db)
+    ok, msg = await auth_svc.verify_login(db, current_user, body.current_password)
+    if not ok:
+        raise HTTPException(401, f"Current password check failed: {msg}")
+    new_user = body.new_username.strip() or current_user
+    if len(body.new_password) < 8:
+        raise HTTPException(400, "New password must be at least 8 characters")
+    if body.new_password == auth_svc.DEFAULT_PASSWORD:
+        raise HTTPException(400, "Pick something other than the default password")
+    await auth_svc.set_credentials(db, new_user, body.new_password)
+    return {"result": "credentials updated", "username": new_user}
 
 
 @router.get("/state", dependencies=[Depends(require_auth)])
@@ -94,6 +138,36 @@ async def set_account_mode(body: AccountMode) -> dict:
         # Safety interlock: switching to LIVE always forces the kill switch OFF.
         patch["kill_switch"] = False
     return await get_db().update_config(patch)
+
+
+class SignalAction(BaseModel):
+    action: str  # accept | reject
+
+
+@router.post("/signals/{signal_id}/action", dependencies=[Depends(require_auth)])
+async def signal_action(signal_id: str, body: SignalAction) -> dict:
+    """Web-app Accept/Reject — same lifecycle as the Telegram buttons (arms
+    execution on accept, updates the Telegram card, records the decision)."""
+    action = body.action.lower()
+    if action not in ("accept", "reject"):
+        raise HTTPException(400, "action must be accept or reject")
+    result = await signal_svc.handle_action(signal_id, action)
+    sig = await get_db().select("signals", f"id=eq.{signal_id}")
+    return {"result": result, "signal": sig[0] if sig else None}
+
+
+class SignalEdit(BaseModel):
+    field: str   # entry | sl | tp
+    value: float
+
+
+@router.post("/signals/{signal_id}/edit", dependencies=[Depends(require_auth)])
+async def signal_edit(signal_id: str, body: SignalEdit) -> dict:
+    """Web-app Edit: change one value; server recomputes the rest (1:4 held)."""
+    sig, msg = await signal_svc.apply_edit(signal_id, body.field.lower(), body.value)
+    if sig is None:
+        raise HTTPException(400, msg)
+    return {"result": msg, "signal": sig}
 
 
 @router.get("/analytics", dependencies=[Depends(require_auth)])

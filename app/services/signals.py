@@ -151,30 +151,27 @@ async def start_edit(signal_id: str, field: str) -> str:
     return f"Send new {field}"
 
 
-async def apply_edit_value(text: str) -> str | None:
-    """Handle a plain-number reply when a signal is awaiting an edit value.
-
-    Returns a user-facing error/confirmation string, or None if no signal was
-    awaiting input (message ignored).
-    """
+async def apply_edit(signal_id: str, field: str, value: float) -> tuple[dict | None, str]:
+    """One-shot Edit shared by web and Telegram: change ONE field, recompute
+    the rest from the 1:4 ratio + stop relationship, persist, audit, and
+    refresh the Telegram card. Returns (updated signal | None, message)."""
     db, tg = get_db(), get_telegram()
-    sig = await db.latest_awaiting_edit()
+    sig = await db.get_signal(signal_id)
     if not sig:
-        return None
-    try:
-        value = float(text.strip().replace(",", ""))
-    except ValueError:
-        return "That's not a number — send just the new value, e.g. 6301.25"
+        return None, "Signal not found"
+    if sig["status"] != "PENDING":
+        return None, f"Signal is {sig['status']} — no longer editable"
+    if field not in ("entry", "sl", "tp"):
+        return None, f"Unknown field: {field}"
 
-    field = sig["awaiting_edit_field"]
     old = float(sig[field])
     try:
         new_plan = recompute(_plan_of(sig), field, value)
     except ValueError as e:
-        return f"Invalid {field}: {e}"
+        return None, f"Invalid {field}: {e}"
 
     sig = await db.update_signal(sig["id"], {
-        "entry": new_plan.entry,
+        "entry": round(new_plan.entry, 6),
         "sl": round(new_plan.sl, 6),
         "tp": round(new_plan.tp, 6),
         "awaiting_edit_field": None,
@@ -187,4 +184,22 @@ async def apply_edit_value(text: str) -> str | None:
         sig, f"✏️ <b>{field.upper()} updated</b> — others recomputed (1:4 held).",
         keyboard=tg.signal_keyboard(sig["id"]),
     )
-    return None  # card already updated; no extra message needed
+    return sig, f"{field} updated — others recomputed"
+
+
+async def apply_edit_value(text: str) -> str | None:
+    """Telegram flow: a plain-number reply while a signal awaits an edit value.
+
+    Returns a user-facing error string, or None if handled / not applicable.
+    """
+    db = get_db()
+    sig = await db.latest_awaiting_edit()
+    if not sig:
+        return None
+    try:
+        value = float(text.strip().replace(",", ""))
+    except ValueError:
+        return "That's not a number — send just the new value, e.g. 6301.25"
+
+    updated, msg = await apply_edit(sig["id"], sig["awaiting_edit_field"], value)
+    return None if updated else msg

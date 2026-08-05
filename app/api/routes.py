@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from app.config import WATCHLIST, get_settings
@@ -168,6 +168,52 @@ async def signal_edit(signal_id: str, body: SignalEdit) -> dict:
     if sig is None:
         raise HTTPException(400, msg)
     return {"result": msg, "signal": sig}
+
+
+@router.get("/telegram/status", dependencies=[Depends(require_auth)])
+async def telegram_status(request: Request) -> dict:
+    """Webhook health. If inline buttons spin forever, the answer is here:
+    usually `url` is empty (setWebhook never ran) or last_error_message
+    shows Telegram being rejected (403 = secret mismatch)."""
+    from app.services.telegram import get_telegram
+
+    s = get_settings()
+    info = await get_telegram().webhook_info() if s.telegram_configured else None
+    result = (info or {}).get("result", {})
+    expected = str(request.base_url).rstrip("/") + "/telegram"
+    return {
+        "configured": s.telegram_configured,
+        "secret_set": bool(s.telegram_webhook_secret),
+        "expected_url": expected,
+        "webhook": {
+            "url": result.get("url", ""),
+            "pending_update_count": result.get("pending_update_count"),
+            "last_error_message": result.get("last_error_message"),
+            "last_error_date": result.get("last_error_date"),
+            "has_custom_certificate": result.get("has_custom_certificate"),
+        },
+        "healthy": bool(result.get("url")) and result.get("url") == expected
+        and not result.get("last_error_message"),
+    }
+
+
+@router.post("/telegram/webhook", dependencies=[Depends(require_auth)])
+async def repair_webhook(request: Request) -> dict:
+    """Point Telegram at this deployment using the configured secret."""
+    from app.services.telegram import get_telegram
+
+    s = get_settings()
+    if not s.telegram_configured:
+        raise HTTPException(400, "TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set")
+    if not s.telegram_webhook_secret:
+        raise HTTPException(400, "TELEGRAM_WEBHOOK_SECRET not set — the webhook would be rejected")
+    base = str(request.base_url).rstrip("/")
+    if not base.startswith("https://"):
+        raise HTTPException(400, f"Telegram requires an https URL (got {base})")
+    resp = await get_telegram().set_webhook(base, s.telegram_webhook_secret)
+    if not resp or not resp.get("ok"):
+        raise HTTPException(502, f"Telegram rejected setWebhook: {resp}")
+    return {"result": "webhook set", "url": base + "/telegram"}
 
 
 @router.get("/analytics", dependencies=[Depends(require_auth)])

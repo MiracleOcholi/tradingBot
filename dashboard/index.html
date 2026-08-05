@@ -358,6 +358,17 @@
     </section>
 
     <section class="card">
+      <h2><span class="msi">send</span>Telegram</h2>
+      <div id="tg-status" class="hint">Checking webhook…</div>
+      <div class="row" style="margin-top:12px">
+        <button id="btn-tg-fix" class="tonal">Repair webhook</button>
+      </div>
+      <div class="hint" style="margin-top:6px">
+        Inline buttons spinning forever means Telegram can't reach this app — repair points it here.
+      </div>
+    </section>
+
+    <section class="card">
       <h2><span class="msi">lock</span>Access</h2>
       <div class="hint">Change your sign-in — the default is public knowledge.</div>
       <div class="row"><span class="label">Current password</span>
@@ -671,6 +682,23 @@ async function refresh(){
   }catch(e){ /* keep last render */ }
 }
 
+async function loadTelegram(){
+  try{
+    const r = await fetch("/api/telegram/status", {headers: authHeaders()});
+    if(!r.ok) return;
+    const d = await r.json();
+    let msg;
+    if(!d.configured) msg = "⚠️ Bot token / chat id not set in the environment.";
+    else if(!d.webhook.url) msg = "⚠️ No webhook registered — inline buttons will hang. Tap Repair.";
+    else if(d.webhook.url !== d.expected_url) msg = "⚠️ Webhook points elsewhere: " + d.webhook.url;
+    else if(d.webhook.last_error_message) msg = "⚠️ Telegram delivery error: " + d.webhook.last_error_message;
+    else msg = "✓ Webhook healthy" + (d.webhook.pending_update_count
+                ? " · " + d.webhook.pending_update_count + " pending" : "");
+    if(!d.secret_set) msg += " · TELEGRAM_WEBHOOK_SECRET missing";
+    $("tg-status").textContent = msg;
+  }catch(e){}
+}
+
 async function loadSecrets(){
   try{
     const r = await fetch("/api/secrets", {headers: authHeaders()});
@@ -887,9 +915,18 @@ $("btn-token").onclick = async () => {
   } finally { btn.disabled = false; }
 };
 
+$("btn-tg-fix").onclick = async () => {
+  const b = $("btn-tg-fix"); b.disabled = true;
+  try{
+    const r = await post("/api/telegram/webhook");
+    toast("Webhook set to " + r.url);
+    loadTelegram();
+  } finally { b.disabled = false; }
+};
+
 window.addEventListener("resize", ()=>{ if(chartData) drawChart(); });
 
-refresh(); loadChart(); loadAnalytics(); loadSecrets();
+refresh(); loadChart(); loadAnalytics(); loadSecrets(); loadTelegram();
 setInterval(refresh, 10000);
 setInterval(loadChart, 15000);
 setInterval(loadAnalytics, 60000);

@@ -60,10 +60,12 @@ async def run() -> None:
         while True:
             try:
                 await market.run()
+                market.boot_error = None
                 return  # clean return = DERIV_APP_ID unset → stay idle
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as e:
+                market.boot_error = f"{type(e).__name__}: {e}"
                 log.exception("market service crashed; restarting in %ss", backoff)
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 300)

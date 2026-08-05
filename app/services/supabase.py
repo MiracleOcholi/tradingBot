@@ -10,6 +10,18 @@ from app.config import get_settings
 log = logging.getLogger("maverick.supabase")
 
 
+def encode_query(query: str) -> str:
+    """Make a hand-built PostgREST query string URL-safe.
+
+    A literal '+' in a query string decodes to a SPACE server-side, which
+    silently corrupts ISO-8601 timestamps ('…T02:58:07+00:00' arrives as
+    '…T02:58:07 00:00' and Postgres rejects it as a timestamptz). We never
+    use '+' as a separator in these queries, so escaping every one of them
+    is always correct — and stops that whole class of bug at the boundary.
+    """
+    return query.replace("+", "%2B")
+
+
 class SupabaseClient:
     def __init__(self) -> None:
         s = get_settings()
@@ -26,6 +38,7 @@ class SupabaseClient:
 
     # ---- generic helpers -------------------------------------------------
     async def select(self, table: str, query: str = "", limit: int | None = None) -> list[dict]:
+        query = encode_query(query)
         url = f"{self._base}/{table}?{query}" if query else f"{self._base}/{table}"
         if limit:
             url += ("&" if "?" in url else "?") + f"limit={limit}"
@@ -55,6 +68,7 @@ class SupabaseClient:
         return r.json()
 
     async def update(self, table: str, query: str, patch: dict) -> list[dict]:
+        query = encode_query(query)
         r = await self._client.patch(
             f"{self._base}/{table}?{query}",
             headers={**self._headers, "Prefer": "return=representation"},

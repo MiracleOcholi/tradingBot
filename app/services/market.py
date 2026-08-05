@@ -71,6 +71,7 @@ class MarketService:
         self.execution = None  # ExecutionService, wired by the watcher
         self.analytics = None  # ExcursionTracker, wired by the watcher
         self.candles_processed = 0
+        self.boot_error: str | None = None   # set by the watcher's supervisor
         self._dirty_cursors: set[str] = set()
         self._lock = asyncio.Lock()
 
@@ -108,8 +109,6 @@ class MarketService:
             log.warning("DERIV_APP_ID not set — market service idle")
             return
         await self.load()
-        if self.strategy is not None:
-            await self.strategy.load()
         self.deriv = DerivClient(
             settings.deriv_app_id, self.symbols, self.on_candle,
             on_history_done=self.on_history_done,
@@ -117,9 +116,21 @@ class MarketService:
         if self.execution is not None:
             self.deriv.on_tick = self.execution.on_tick
             self.deriv.on_contract = self.execution.on_contract
-            await self.execution.load()
-        if self.analytics is not None:
-            await self.analytics.load()
+
+        # Rehydrating the auxiliary subsystems must never stop the market
+        # feed: a failure here degrades that one subsystem, it does not
+        # blind the engine. (A PostgREST 400 in the analytics loader once
+        # aborted boot before the socket ever opened.)
+        for name, loader in (
+            ("strategy", self.strategy), ("execution", self.execution), ("analytics", self.analytics)
+        ):
+            if loader is None:
+                continue
+            try:
+                await loader.load()
+            except Exception:
+                log.exception("%s failed to rehydrate; continuing without its state", name)
+
         await self.deriv.run()
 
     # ---------------------------------------------------------------- ingest
@@ -244,6 +255,10 @@ class MarketService:
             "trackers": len(self.trackers),
             "levels": sum(len(t.active_levels()) for t in self.trackers.values()),
             "candles_processed": self.candles_processed,
+            # A crash during the boot sequence (before the socket opens) is
+            # otherwise invisible: the app answers /health while the engine
+            # is dead. Surface it.
+            "boot_error": self.boot_error,
         }
 
 

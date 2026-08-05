@@ -34,6 +34,7 @@ class DerivAPIError(Exception):
 
 
 GRANULARITY = {"M15": 900, "H1": 3600, "H4": 14400, "D1": 86400}
+SUBSCRIBE_STAGGER_S = 0.35   # spread the initial subscription burst
 TF_OF_GRANULARITY = {v: k for k, v in GRANULARITY.items()}
 
 # on_candle(symbol, timeframe, candle, is_history)
@@ -123,6 +124,8 @@ class DerivClient:
         self.authorized_loginid: str | None = None
         self.last_error: str | None = None
         self.connect_attempts = 0
+        self.recent_errors: deque[dict] = deque(maxlen=8)
+        self.subscriptions_sent = 0
 
     def status(self) -> dict:
         return {
@@ -133,6 +136,8 @@ class DerivClient:
             # Surfaced so a failing socket is diagnosable from /health alone,
             # without shell access to the Render logs.
             "last_error": self.last_error,
+            "api_errors": list(self.recent_errors),
+            "subscribed": self.subscriptions_sent,
         }
 
     def candles(
@@ -179,6 +184,7 @@ class DerivClient:
             self.authorized_loginid = None  # a new socket is unauthorized
             log.info("deriv ws connected")
             try:
+                self.subscriptions_sent = 0
                 for symbol in self.symbols:
                     for tf in self.timeframes:
                         self._req_id += 1
@@ -193,6 +199,10 @@ class DerivClient:
                             "req_id": self._req_id,
                             "passthrough": {"symbol": symbol, "tf": tf},
                         }))
+                        self.subscriptions_sent += 1
+                        # Deriv rate-limits bursts; 28 requests fired back to
+                        # back can be rejected wholesale.
+                        await asyncio.sleep(SUBSCRIBE_STAGGER_S)
                 for symbol in list(self._tick_symbols):
                     await ws.send(json.dumps({"ticks": symbol, "subscribe": 1}))
                 for cid in list(self._contract_ids):
@@ -275,8 +285,24 @@ class DerivClient:
             # fall through: subscription confirmations also carry stream data
 
         if msg.get("error"):
-            if req_id is None:
-                log.error("deriv error: %s", msg["error"])
+            # Every error is recorded, including ones carrying a req_id from
+            # a fire-and-forget subscription — those used to be dropped
+            # silently, which hid failing candle subscriptions completely
+            # (socket connected, zero streams, no explanation anywhere).
+            err = msg["error"]
+            echo = msg.get("echo_req", {})
+            context = echo.get("passthrough") or {
+                k: echo.get(k) for k in ("ticks_history", "ticks", "granularity") if echo.get(k)
+            }
+            entry = {
+                "code": err.get("code"),
+                "message": err.get("message"),
+                "request": context,
+                "at": datetime.now(UTC).isoformat(),
+            }
+            self.recent_errors.append(entry)
+            log.error("deriv API error %s: %s (request: %s)",
+                      err.get("code"), err.get("message"), context)
             return
 
         msg_type = msg.get("msg_type")

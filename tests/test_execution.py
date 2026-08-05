@@ -199,3 +199,52 @@ async def test_multiplier_pick_rejects_substake(svc):
     # stake = 10/(2000*0.01) = $0.50 < $1 minimum → None
     m = await svc._pick_multiplier("R_10", plan, 1000.0, 0.01)
     assert m is None
+
+
+async def _prep_fire(svc, monkeypatch, is_virtual, mode="DEMO"):
+    """Arm an order with a stored token and a fake authorize result."""
+    import app.services.crypto as crypto_mod
+
+    svc.db.config["account_mode"] = mode
+    svc.db.tables["secrets"].append(
+        {"name": f"deriv_token_{mode.lower()}", "value_encrypted": "enc"}
+    )
+    monkeypatch.setattr(crypto_mod, "decrypt", lambda v: "tok")
+
+    class FakeDeriv:
+        async def authorize(self, token):
+            return {"is_virtual": 1 if is_virtual else 0,
+                    "loginid": "VRTC1" if is_virtual else "CR1",
+                    "currency": "USD"}
+
+        async def send(self, payload, timeout=20.0):
+            return {"balance": {"balance": 1000.0}}
+
+        async def subscribe_ticks(self, s):
+            pass
+
+        async def unsubscribe_ticks(self, s):
+            pass
+
+    class FakeMarket:
+        deriv = FakeDeriv()
+
+    svc.market = FakeMarket()
+    return await svc.arm({**SIGNAL, "account_mode": mode})
+
+
+async def test_refuses_real_account_while_in_demo_mode(svc, monkeypatch):
+    vo = await _prep_fire(svc, monkeypatch, is_virtual=False, mode="DEMO")
+    await svc.on_tick("R_10", 100.0, 0)
+    row = svc.db.tables["virtual_orders"][0]
+    assert row["status"] == "CANCELLED"
+    assert "refusing to trade" in row["reason"]
+    assert vo["id"] not in svc.armed
+
+
+async def test_refuses_virtual_account_while_in_live_mode(svc, monkeypatch):
+    await _prep_fire(svc, monkeypatch, is_virtual=True, mode="LIVE")
+    await svc.on_tick("R_10", 100.0, 0)
+    row = svc.db.tables["virtual_orders"][0]
+    assert row["status"] == "CANCELLED"
+    assert "refusing to trade" in row["reason"]

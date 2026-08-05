@@ -89,11 +89,13 @@ class DerivClient:
         on_candle: CandleHandler,
         timeframes: list[str] | None = None,
         history_count: int = 300,
+        on_history_done: Callable[[str, str], Awaitable[None]] | None = None,
     ) -> None:
         self.url = f"wss://ws.derivws.com/websockets/v3?app_id={app_id}"
         self.symbols = symbols
         self.timeframes = timeframes or list(GRANULARITY)
         self.on_candle = on_candle
+        self.on_history_done = on_history_done
         self.history_count = history_count
         self.streams: dict[tuple[str, str], CandleStream] = {}
         self.connected = False
@@ -107,12 +109,14 @@ class DerivClient:
             "streams": len(self.streams),
         }
 
-    def candles(self, symbol: str, timeframe: str, limit: int = 200) -> list[Candle]:
+    def candles(
+        self, symbol: str, timeframe: str, limit: int = 200, completed_only: bool = False
+    ) -> list[Candle]:
         stream = self.streams.get((symbol, timeframe))
         if not stream:
             return []
         out = list(stream.completed)[-limit:]
-        if stream.forming:
+        if stream.forming and not completed_only:
             out.append(stream.forming)  # forming candle last (chart draws it lighter)
         return out
 
@@ -170,6 +174,8 @@ class DerivClient:
             stream = self.streams.setdefault((symbol, tf), CandleStream(symbol, tf))
             for candle in stream.ingest_history(msg.get("candles", [])):
                 await self.on_candle(symbol, tf, candle, True)
+            if self.on_history_done is not None:
+                await self.on_history_done(symbol, tf)
 
         elif msg_type == "ohlc":
             ohlc = msg["ohlc"]

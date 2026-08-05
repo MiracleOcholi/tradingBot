@@ -20,6 +20,12 @@ from app.services.supabase import get_db
 from app.services.telegram import get_telegram
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+# httpx logs every request URL at INFO. Telegram embeds the BOT TOKEN in the
+# URL path (…/bot<token>/getWebhookInfo), so those lines leak the credential
+# into hosting logs and anywhere they are pasted. Warnings and errors still
+# come through; request tracing does not.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 log = logging.getLogger("maverick")
 
 DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "dashboard"

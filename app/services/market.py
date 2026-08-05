@@ -72,6 +72,7 @@ class MarketService:
         self.analytics = None  # ExcursionTracker, wired by the watcher
         self.candles_processed = 0
         self.boot_error: str | None = None   # set by the watcher's supervisor
+        self.session_status: dict = {}
         self._dirty_cursors: set[str] = set()
         self._lock = asyncio.Lock()
 
@@ -115,6 +116,7 @@ class MarketService:
             settings.deriv_app_id_clean, self.symbols, self.on_candle,
             on_history_done=self.on_history_done,
             token_provider=self._market_token,
+            url_provider=self._websocket_url,
         )
         if self.execution is not None:
             self.deriv.on_tick = self.execution.on_tick
@@ -174,6 +176,37 @@ class MarketService:
                 self._dirty_cursors.add(symbol)  # flushed on history-batch end
             else:
                 await self._save_cursor(symbol)
+
+    async def _websocket_url(self) -> str | None:
+        """Mint a current-generation socket URL, or None to use legacy.
+
+        Called before every connection attempt because the OTP is
+        single-use — a reconnect must not replay the previous one.
+        """
+        from app.config import get_settings
+        from app.services.deriv_session import DerivSession
+
+        token = await self._market_token()
+        if not token:
+            return None
+        cfg = {}
+        try:
+            cfg = await self.db.get_config()
+        except Exception:
+            log.exception("could not read config for account mode; assuming DEMO")
+        session = DerivSession(
+            app_id=get_settings().deriv_app_id_clean,
+            token=token,
+            demo=cfg.get("account_mode", "DEMO") != "LIVE",
+        )
+        url = await session.websocket_url()
+        self.session_status = session.status()
+        if url:
+            log.info("using the current-generation socket for account %s", session.account_id)
+        else:
+            log.warning("current-generation socket unavailable (%s); falling back to legacy",
+                        session.last_error)
+        return url
 
     async def _market_token(self) -> str | None:
         """A token for the data socket. Demo is preferred — market data is
@@ -277,6 +310,7 @@ class MarketService:
             # otherwise invisible: the app answers /health while the engine
             # is dead. Surface it.
             "boot_error": self.boot_error,
+            "session": self.session_status,
         }
 
 

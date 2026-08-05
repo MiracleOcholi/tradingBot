@@ -112,8 +112,14 @@ class DerivClient:
         on_history_done: Callable[[str, str], Awaitable[None]] | None = None,
         token_provider: Callable[[], Awaitable[str | None]] | None = None,
         fallback_app_id: str | None = PUBLIC_FALLBACK_APP_ID,
+        url_provider: Callable[[], Awaitable[str | None]] | None = None,
     ) -> None:
         self.token_provider = token_provider
+        # Resolved before EVERY connection attempt: the current-generation
+        # endpoint is opened with a single-use OTP, so a reconnect needs a
+        # freshly minted URL rather than the previous one.
+        self.url_provider = url_provider
+        self.resolved_url: str | None = None
         self.app_id = app_id
         self.fallback_app_id = fallback_app_id or None
         self.active_app_id = app_id
@@ -149,6 +155,20 @@ class DerivClient:
     def url(self) -> str:
         return f"wss://ws.derivws.com/websockets/v3?app_id={self.active_app_id}"
 
+    async def resolve_url(self) -> str:
+        """Current-generation URL when one can be minted, else legacy."""
+        if self.url_provider is not None:
+            try:
+                url = await self.url_provider()
+            except Exception:
+                log.exception("websocket url provider failed; using the legacy endpoint")
+                url = None
+            if url:
+                self.resolved_url = url
+                return url
+        self.resolved_url = None
+        return self.url
+
     def status(self) -> dict:
         return {
             "connected": self.connected,
@@ -169,6 +189,10 @@ class DerivClient:
             "available_synthetics": self.available_synthetics,
             "auth": self.auth_state,
             "symbols_probe": self.symbols_probe,
+            "endpoint": (
+                "current-api" if self.resolved_url and "trading/v1" in self.resolved_url
+                else "legacy"
+            ),
         }
 
     def candles(
@@ -231,7 +255,8 @@ class DerivClient:
         return True
 
     async def _session(self) -> None:
-        async with websockets.connect(self.url, ping_interval=30, ping_timeout=15) as ws:
+        url = await self.resolve_url()
+        async with websockets.connect(url, ping_interval=30, ping_timeout=15) as ws:
             self._ws = ws
             self.connected = True
             self.last_error = None

@@ -60,10 +60,16 @@ async def health() -> JSONResponse:
         "schema": _schema_status,
         "encryption": crypto.key_status(),
         "telegram_configured": get_settings().telegram_configured,
-        # app ids are public identifiers (they travel in the client URL),
-        # so echoing the parsed value is safe and makes a mis-pasted env
-        # var obvious at a glance.
-        "deriv_app_id": get_settings().deriv_app_id_clean or None,
+        # A VALID app id is a public identifier (it travels in the client
+        # URL), so echoing it is safe and makes a mis-pasted env var
+        # obvious. Anything non-numeric is NOT an app id — it may well be a
+        # token pasted into the wrong variable — so never echo it here.
+        "deriv_app_id": (
+            get_settings().deriv_app_id_clean
+            if get_settings().deriv_app_id_valid
+            else ("<set, but not a numeric app id>"
+                  if get_settings().deriv_app_id_clean else None)
+        ),
         "deriv_app_id_valid": get_settings().deriv_app_id_valid,
         "watcher": watcher.status(),
         "env": get_settings().app_env,

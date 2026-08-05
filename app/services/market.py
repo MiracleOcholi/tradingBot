@@ -67,7 +67,10 @@ class MarketService:
         self.trackers: dict[tuple[str, str], SNRTracker] = {}
         self.cursor: dict[tuple[str, str], datetime] = {}
         self.deriv: DerivClient | None = None
+        self.strategy = None   # StrategyService, wired by the watcher
+        self.execution = None  # ExecutionService, wired by the watcher
         self.candles_processed = 0
+        self._dirty_cursors: set[str] = set()
         self._lock = asyncio.Lock()
 
     # ---------------------------------------------------------------- boot
@@ -104,34 +107,56 @@ class MarketService:
             log.warning("DERIV_APP_ID not set — market service idle")
             return
         await self.load()
-        self.deriv = DerivClient(settings.deriv_app_id, self.symbols, self.on_candle)
+        if self.strategy is not None:
+            await self.strategy.load()
+        self.deriv = DerivClient(
+            settings.deriv_app_id, self.symbols, self.on_candle,
+            on_history_done=self.on_history_done,
+        )
+        if self.execution is not None:
+            self.deriv.on_tick = self.execution.on_tick
+            self.deriv.on_contract = self.execution.on_contract
+            await self.execution.load()
         await self.deriv.run()
 
     # ---------------------------------------------------------------- ingest
     async def on_candle(self, symbol: str, tf: str, candle: Candle, is_history: bool) -> None:
-        if tf not in SNR_TIMEFRAMES:
-            return  # M15/H1: chart cache only (held by DerivClient)
-
         key = (symbol, tf)
         cursor = self.cursor.get(key)
         if cursor is not None and candle.ts <= cursor:
             return  # already processed before a restart
 
         async with self._lock:
-            tracker = self.trackers.setdefault(
-                key, SNRTracker(symbol, tf, GRANULARITY[tf])
-            )
-            # The tracker needs the true previous candle after a cold boot:
-            # the first replayed candle only primes prev_candle (no pairing
-            # with a candle we never saw).
-            upd = tracker.process_candle(candle)
+            if tf in SNR_TIMEFRAMES:
+                tracker = self.trackers.setdefault(
+                    key, SNRTracker(symbol, tf, GRANULARITY[tf])
+                )
+                # After a cold boot the first replayed candle only primes
+                # prev_candle (no pairing with a candle we never saw).
+                upd = tracker.process_candle(candle)
+                try:
+                    await self._persist(upd)
+                except Exception:
+                    log.exception("persist failed for %s %s @ %s", symbol, tf, candle.ts)
+
+            if self.strategy is not None:
+                try:
+                    await self.strategy.on_candle(symbol, tf, candle, is_history)
+                except Exception:
+                    log.exception("strategy failed for %s %s @ %s", symbol, tf, candle.ts)
+
             self.candles_processed += 1
-            try:
-                await self._persist(upd)
-                self.cursor[key] = candle.ts
+            self.cursor[key] = candle.ts
+            if is_history:
+                self._dirty_cursors.add(symbol)  # flushed on history-batch end
+            else:
                 await self._save_cursor(symbol)
-            except Exception:
-                log.exception("persist failed for %s %s @ %s", symbol, tf, candle.ts)
+
+    async def on_history_done(self, symbol: str, tf: str) -> None:
+        if symbol in self._dirty_cursors:
+            self._dirty_cursors.discard(symbol)
+            async with self._lock:
+                await self._save_cursor(symbol)
 
     async def _persist(self, upd) -> None:
         if upd.new_level is not None:
@@ -163,7 +188,7 @@ class MarketService:
     async def _save_cursor(self, symbol: str) -> None:
         payload_cursor = {
             tf: self.cursor[(symbol, tf)].isoformat()
-            for tf in SNR_TIMEFRAMES
+            for tf in ("D1", "H4", "H1", "M15")
             if (symbol, tf) in self.cursor
         }
         rows = await self.db.select("engine_state", f"symbol=eq.{symbol}")

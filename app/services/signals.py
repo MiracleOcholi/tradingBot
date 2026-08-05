@@ -48,6 +48,42 @@ async def create_mock_signal(symbol: str | None = None) -> dict:
     return sig
 
 
+async def create_setup_signal(
+    symbol: str,
+    side: Side,
+    entry: float,
+    sl: float,
+    tp: float,
+    order_block: dict | None,
+    context: dict,
+    expired: bool = False,
+) -> dict:
+    """A REAL confirmed setup (SETUP_CONFIRMED → Telegram, PDF §8.4).
+
+    `expired=True` marks a setup recovered from stale history replay: it is
+    logged for the analytics loop but never alerted or armed.
+    """
+    db, tg = get_db(), get_telegram()
+    cfg = await db.get_config()
+    sig = await db.create_signal({
+        "symbol": symbol,
+        "side": side.value,
+        "account_mode": cfg["account_mode"],
+        "entry": round(float(entry), 6),
+        "sl": round(float(sl), 6),
+        "tp": round(float(tp), 6),
+        "status": "EXPIRED" if expired else "PENDING",
+        "is_mock": False,
+        "order_block": order_block,
+        "context": context,
+    })
+    if not expired:
+        msg_id = await tg.send_signal_card(sig)
+        if msg_id:
+            sig = await db.update_signal(sig["id"], {"telegram_message_id": msg_id})
+    return sig
+
+
 def _plan_of(sig: dict) -> TradePlan:
     return TradePlan(
         side=Side(sig["side"]),
@@ -69,8 +105,15 @@ async def handle_action(signal_id: str, action: str) -> str:
     if action == "accept":
         sig = await db.update_signal(signal_id, {"status": "ACCEPTED", "awaiting_edit_field": None})
         await db.record_decision(signal_id, "ACCEPT")
-        note = ("🟢 <b>Accepted.</b> (Phase A mock — execution arms in Phase D)"
-                if sig["is_mock"] else "🟢 <b>Accepted — arming virtual pending order.</b>")
+        if sig["is_mock"]:
+            note = "🟢 <b>Accepted.</b> (mock signal — nothing armed)"
+        else:
+            from app.execution.emulated_pending import get_execution
+            cfg = await db.get_config()
+            await get_execution().arm(sig)
+            note = "🟢 <b>Accepted — virtual pending order ARMED at entry.</b>"
+            if not cfg.get("kill_switch"):
+                note += "\n⚠️ Kill switch is OFF — the order will be cancelled at touch unless you arm it."
         await tg.update_signal_card(sig, note, keyboard={"inline_keyboard": []})
         return "Accepted"
 

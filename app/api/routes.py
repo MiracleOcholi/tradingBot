@@ -95,6 +95,33 @@ async def set_account_mode(body: AccountMode) -> dict:
     return await get_db().update_config(patch)
 
 
+class SecretIn(BaseModel):
+    name: str   # deriv_token_demo | deriv_token_live
+    value: str
+
+
+@router.post("/secrets", dependencies=[Depends(require_auth)])
+async def store_secret(body: SecretIn) -> dict:
+    """Store a Deriv account token encrypted-at-rest (Fernet, ENCRYPTION_KEY).
+    The plaintext is never persisted or echoed back."""
+    from app.services import crypto
+
+    if body.name not in ("deriv_token_demo", "deriv_token_live"):
+        raise HTTPException(400, "unknown secret name")
+    if not body.value.strip():
+        raise HTTPException(400, "empty value")
+    try:
+        encrypted = crypto.encrypt(body.value.strip())
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
+    await get_db().upsert(
+        "secrets",
+        {"name": body.name, "value_encrypted": encrypted, "updated_at": "now()"},
+        on_conflict="name",
+    )
+    return {"stored": body.name}
+
+
 @router.post("/mock-signal", dependencies=[Depends(require_auth)])
 async def mock_signal(symbol: str | None = None) -> dict:
     cfg = await get_db().get_config()

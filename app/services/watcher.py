@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 
 from app.services import reminders, signals
 from app.services.market import get_market
+from app.services.strategy import get_strategy
 from app.services.supabase import get_db
 
 log = logging.getLogger("maverick.watcher")
@@ -29,13 +30,25 @@ _state = {"started_at": None, "last_tick": None, "ticks": 0, "last_error": None}
 
 
 def status() -> dict:
-    return {**_state, "market": get_market().status()}
+    from app.execution.emulated_pending import get_execution
+    return {
+        **_state,
+        "market": get_market().status(),
+        "strategy": get_strategy().status(),
+        "execution": get_execution().status(),
+    }
 
 
 async def run() -> None:
+    from app.execution.emulated_pending import get_execution
     _state["started_at"] = datetime.now(timezone.utc).isoformat()
     log.info("watcher started")
-    market_task = asyncio.create_task(get_market().run(), name="market")
+    market, strategy, execution = get_market(), get_strategy(), get_execution()
+    market.strategy = strategy
+    market.execution = execution
+    strategy.market = market
+    execution.market = market
+    market_task = asyncio.create_task(market.run(), name="market")
     try:
         await _housekeeping()
     finally:

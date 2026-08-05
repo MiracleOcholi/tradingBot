@@ -7,6 +7,12 @@
   break).  → Setup structural break.
 - Swing = extreme + ≥1 opposing candle (a swing high is a high followed by
   ≥1 bearish candle; a swing low is a low followed by ≥1 bullish candle).
+  The swing candle itself is the end of the move being reversed, so it is
+  opposite-coloured to its confirmer (worked example §7-B3: 'the last swing
+  low (a single BEARISH candle before the rejection)'): swing high = bullish
+  candle then bearish confirm; swing low = bearish candle then bullish
+  confirm. This is also what makes the M15 breakout literally 'engulf' the
+  swing candle, which then becomes the order block (§6.9).
 """
 from __future__ import annotations
 
@@ -24,17 +30,17 @@ class Swing:
 
 
 def last_swing_high(candles: list[Candle]) -> Swing | None:
-    """Most recent confirmed swing high: candle i's high with candles[i+1] bearish."""
+    """Most recent confirmed swing high: bullish candle i, candles[i+1] bearish."""
     for i in range(len(candles) - 2, -1, -1):
-        if candles[i + 1].bearish:
+        if candles[i].bullish and candles[i + 1].bearish:
             return Swing("HIGH", candles[i].high, candles[i], candles[i + 1])
     return None
 
 
 def last_swing_low(candles: list[Candle]) -> Swing | None:
-    """Most recent confirmed swing low: candle i's low with candles[i+1] bullish."""
+    """Most recent confirmed swing low: bearish candle i, candles[i+1] bullish."""
     for i in range(len(candles) - 2, -1, -1):
-        if candles[i + 1].bullish:
+        if candles[i].bearish and candles[i + 1].bullish:
             return Swing("LOW", candles[i].low, candles[i], candles[i + 1])
     return None
 

@@ -157,8 +157,17 @@ class DerivClient:
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                self.last_error = f"{type(e).__name__}: {e}"
-                log.warning("deriv ws dropped (%r); reconnecting in %ss", e, backoff)
+                detail = f"{type(e).__name__}: {e}"
+                if "401" in str(e) or "403" in str(e):
+                    # Deriv refuses the handshake when app_id is not a
+                    # registered application — a config error, not a blip.
+                    detail += (
+                        " — Deriv rejected DERIV_APP_ID. Register an application at "
+                        "api.deriv.com (Dashboard → Register application) and set its "
+                        "numeric app id."
+                    )
+                self.last_error = detail
+                log.warning("deriv ws dropped (%s); reconnecting in %ss", detail, backoff)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60)
 

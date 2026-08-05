@@ -19,9 +19,9 @@ trade); the tap logic only consumes levels that are fresh at that moment.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable
 
 from app.core.breaks import h4_body_to_body_break
 from app.core.models import Candle, SNRLevel

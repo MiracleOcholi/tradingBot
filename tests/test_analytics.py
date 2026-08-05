@@ -1,5 +1,5 @@
 """Phase F: deterministic stats, excursion metrics, suggestion thresholds."""
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -80,7 +80,7 @@ def make_rec(side="BUY"):
         "tp": 125.0 if side == "BUY" else 95.0,
         "order_block": {"high": 105.0, "low": 103.0} if side == "BUY"
                        else {"high": 117.0, "low": 115.0},
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "context": {},
     }
     t.register(sig)

@@ -2,7 +2,7 @@
 
 Uses in-memory fakes for Supabase and Telegram; no network anywhere.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -35,7 +35,7 @@ class FakeDB:
     async def insert(self, table, row):
         self._id += 1
         stored = {**row, "id": f"{table}-{self._id}",
-                  "armed_at": datetime.now(timezone.utc).isoformat()}
+                  "armed_at": datetime.now(UTC).isoformat()}
         self.tables[table].append(stored)
         return [stored]
 
@@ -82,7 +82,7 @@ async def test_arm_creates_row_and_tracks(svc):
 
 
 async def test_buy_triggers_only_at_or_below_entry(svc):
-    vo = await svc.arm(SIGNAL)
+    await svc.arm(SIGNAL)
     fired = []
 
     async def fake_fire(v, q):
@@ -132,7 +132,7 @@ async def test_tp_traded_before_entry_expires_sell_order(svc):
 async def test_ttl_expiry(svc):
     vo = await svc.arm(SIGNAL)
     svc.armed[vo["id"]]["armed_at"] = (
-        datetime.now(timezone.utc) - timedelta(hours=ARM_TTL_H + 1)
+        datetime.now(UTC) - timedelta(hours=ARM_TTL_H + 1)
     ).isoformat()
     await svc.on_tick("R_10", 101.0, 0)
     assert vo["id"] not in svc.armed
@@ -152,7 +152,7 @@ async def test_kill_switch_off_cancels_at_touch(svc):
 
 async def test_account_mode_mismatch_cancels(svc):
     svc.db.config["account_mode"] = "LIVE"
-    vo = await svc.arm(SIGNAL)               # DEMO order
+    await svc.arm(SIGNAL)                    # DEMO order
     await svc.on_tick("R_10", 100.0, 0)
     row = svc.db.tables["virtual_orders"][0]
     assert row["status"] == "CANCELLED"
@@ -163,7 +163,7 @@ async def test_max_open_trades_blocks(svc):
     svc.db.tables["trades"].append(
         {"id": "t1", "status": "OPEN", "account_mode": "DEMO"}
     )
-    vo = await svc.arm(SIGNAL)
+    await svc.arm(SIGNAL)
     await svc.on_tick("R_10", 100.0, 0)
     row = svc.db.tables["virtual_orders"][0]
     assert row["status"] == "CANCELLED"
@@ -171,7 +171,7 @@ async def test_max_open_trades_blocks(svc):
 
 
 async def test_missing_token_cancels(svc):
-    vo = await svc.arm(SIGNAL)               # no secrets stored
+    await svc.arm(SIGNAL)                    # no secrets stored
     await svc.on_tick("R_10", 100.0, 0)
     row = svc.db.tables["virtual_orders"][0]
     assert row["status"] == "CANCELLED"

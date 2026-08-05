@@ -16,8 +16,8 @@ import asyncio
 import json
 import logging
 from collections import deque
-from datetime import datetime, timezone
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 
 import websockets
 
@@ -42,7 +42,7 @@ CandleHandler = Callable[[str, str, Candle, bool], Awaitable[None]]
 
 def _to_candle(d: dict) -> Candle:
     return Candle(
-        ts=datetime.fromtimestamp(int(d["epoch"] if "epoch" in d else d["open_time"]), tz=timezone.utc),
+        ts=datetime.fromtimestamp(int(d["epoch"] if "epoch" in d else d["open_time"]), tz=UTC),
         open=float(d["open"]),
         high=float(d["high"]),
         low=float(d["low"]),
@@ -71,7 +71,7 @@ class CandleStream:
 
     def ingest_ohlc(self, ohlc: dict) -> Candle | None:
         """Streaming update. Returns the just-COMPLETED candle, if any."""
-        open_time = datetime.fromtimestamp(int(ohlc["open_time"]), tz=timezone.utc)
+        open_time = datetime.fromtimestamp(int(ohlc["open_time"]), tz=UTC)
         candle = Candle(
             ts=open_time,
             open=float(ohlc["open"]),
@@ -175,7 +175,7 @@ class DerivClient:
                         {"proposal_open_contract": 1, "contract_id": cid, "subscribe": 1}
                     ))
                 async for raw in ws:
-                    self.last_message_at = datetime.now(timezone.utc)
+                    self.last_message_at = datetime.now(UTC)
                     await self._handle(json.loads(raw))
             finally:
                 self.connected = False

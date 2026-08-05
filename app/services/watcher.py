@@ -13,8 +13,9 @@ Supabase and reloaded on boot.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.services import reminders, signals
 from app.services.market import get_market
@@ -41,7 +42,7 @@ def status() -> dict:
 
 async def run() -> None:
     from app.execution.emulated_pending import get_execution
-    _state["started_at"] = datetime.now(timezone.utc).isoformat()
+    _state["started_at"] = datetime.now(UTC).isoformat()
     log.info("watcher started")
     from app.services.analytics import get_tracker
     market, strategy, execution = get_market(), get_strategy(), get_execution()
@@ -55,18 +56,19 @@ async def run() -> None:
         await _housekeeping()
     finally:
         market_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await market_task
-        except asyncio.CancelledError:
-            pass
 
 
 async def _housekeeping() -> None:
-    last_mock = 0.0
+    # Anchor the mock timer to boot time: monotonic clocks start at an
+    # arbitrary (often huge) value, so `last_mock = 0` would fire a mock
+    # card on every Render wake-up.
+    last_mock = asyncio.get_event_loop().time()
     while True:
         try:
             _state["ticks"] += 1
-            _state["last_tick"] = datetime.now(timezone.utc).isoformat()
+            _state["last_tick"] = datetime.now(UTC).isoformat()
 
             await reminders.tick()
 

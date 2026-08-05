@@ -36,6 +36,27 @@ def test_new_open_time_completes_previous_candle():
     assert int(s.forming.ts.timestamp()) == 900
 
 
+def test_reconnect_history_overlap_is_deduplicated():
+    s = CandleStream("R_10", "M15")
+    s.ingest_history([
+        {"epoch": 0, "open": 1, "high": 1, "low": 1, "close": 1},
+        {"epoch": 900, "open": 1, "high": 1, "low": 1, "close": 1},
+        {"epoch": 1800, "open": 1, "high": 1, "low": 1, "close": 1},
+    ])
+    assert len(s.completed) == 2
+    # reconnect: overlapping batch re-sent plus one genuinely new candle
+    fresh = s.ingest_history([
+        {"epoch": 0, "open": 1, "high": 1, "low": 1, "close": 1},
+        {"epoch": 900, "open": 1, "high": 1, "low": 1, "close": 1},
+        {"epoch": 1800, "open": 1, "high": 1, "low": 1, "close": 1.5},
+        {"epoch": 2700, "open": 1.5, "high": 1.6, "low": 1.4, "close": 1.5},
+    ])
+    assert [int(c.ts.timestamp()) for c in fresh] == [1800]
+    stamps = [int(c.ts.timestamp()) for c in s.completed]
+    assert stamps == sorted(set(stamps)) == [0, 900, 1800]   # strictly ordered, no dupes
+    assert int(s.forming.ts.timestamp()) == 2700
+
+
 def test_granularity_maps_are_inverse():
     for tf, g in GRANULARITY.items():
         assert TF_OF_GRANULARITY[g] == tf

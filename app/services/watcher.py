@@ -51,7 +51,24 @@ async def run() -> None:
     market.analytics = get_tracker()
     strategy.market = market
     execution.market = market
-    market_task = asyncio.create_task(market.run(), name="market")
+
+    async def market_supervisor() -> None:
+        """market.run() reconnects the WS itself, but a failure during its
+        boot sequence (Supabase load on a cold start) would otherwise kill
+        the market silently. Restart it with capped backoff."""
+        backoff = 5
+        while True:
+            try:
+                await market.run()
+                return  # clean return = DERIV_APP_ID unset → stay idle
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("market service crashed; restarting in %ss", backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 300)
+
+    market_task = asyncio.create_task(market_supervisor(), name="market")
     try:
         await _housekeeping()
     finally:

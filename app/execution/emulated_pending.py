@@ -214,6 +214,21 @@ class ExecutionService:
             try:
                 token = crypto.decrypt(token_row[0]["value_encrypted"])
                 auth = await self.deriv.authorize(token)
+                # The account the broker actually authorized must match the
+                # mode we believe we are in. Tokens can map to several
+                # accounts, and the data socket may have authorized with a
+                # different one — never place an order on a real account
+                # while the dashboard says DEMO.
+                is_virtual = bool(auth.get("is_virtual"))
+                wants_virtual = cfg["account_mode"] == "DEMO"
+                if is_virtual != wants_virtual:
+                    await self.cancel(
+                        vo["id"], "CANCELLED",
+                        f"refusing to trade: mode is {cfg['account_mode']} but the token "
+                        f"authorized {auth.get('loginid')} "
+                        f"({'virtual' if is_virtual else 'REAL'})",
+                    )
+                    return
                 currency = auth.get("currency", "USD")
                 bal_resp = await self.deriv.send({"balance": 1})
                 balance = float(bal_resp.get("balance", {}).get("balance") or

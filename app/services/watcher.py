@@ -1,10 +1,10 @@
 """Background asyncio watcher.
 
-Phase A: heartbeat + reminder-engine ticks (+ hourly mock signal when
-config.mock_signals is on) — proves the loop survives Koyeb sleep/wake.
-Phase B adds: Deriv WS candles (D1/H4/H1/M15 × 7 symbols) → SNR engine.
-Phase C adds: Direction + Setup state machines.
-Phase D adds: tick-watch for armed virtual orders → multiplier execution.
+Runs two loops:
+- housekeeping tick (reminders + optional hourly mock signal),
+- the market service (Deriv WS candles D1/H4/H1/M15 × watchlist → SNR
+  engine → Supabase). Phase C adds the Direction/Setup state machines,
+  Phase D the tick-watch for armed virtual orders.
 
 Statelessness rule: nothing decision-relevant lives only in memory — SNR
 levels, state machines, virtual orders and reminders are persisted to
@@ -17,6 +17,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.services import reminders, signals
+from app.services.market import get_market
 from app.services.supabase import get_db
 
 log = logging.getLogger("maverick.watcher")
@@ -28,12 +29,24 @@ _state = {"started_at": None, "last_tick": None, "ticks": 0, "last_error": None}
 
 
 def status() -> dict:
-    return dict(_state)
+    return {**_state, "market": get_market().status()}
 
 
 async def run() -> None:
     _state["started_at"] = datetime.now(timezone.utc).isoformat()
     log.info("watcher started")
+    market_task = asyncio.create_task(get_market().run(), name="market")
+    try:
+        await _housekeeping()
+    finally:
+        market_task.cancel()
+        try:
+            await market_task
+        except asyncio.CancelledError:
+            pass
+
+
+async def _housekeeping() -> None:
     last_mock = 0.0
     while True:
         try:

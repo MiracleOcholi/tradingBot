@@ -10,6 +10,8 @@ from pydantic import BaseModel
 from app.config import WATCHLIST, get_settings
 from app.services import signals as signal_svc
 from app.services import watcher
+from app.services.deriv import GRANULARITY
+from app.services.market import get_market
 from app.services.supabase import get_db
 
 log = logging.getLogger("maverick.api")
@@ -37,6 +39,15 @@ async def get_state() -> dict[str, Any]:
         "open_trades": open_trades,
         "watcher": watcher.status(),
     }
+
+
+@router.get("/candles")
+async def get_candles(symbol: str, tf: str = "M15", limit: int = 200) -> dict:
+    if symbol not in WATCHLIST:
+        raise HTTPException(400, f"unknown symbol: {symbol}")
+    if tf not in GRANULARITY:
+        raise HTTPException(400, f"tf must be one of {list(GRANULARITY)}")
+    return get_market().chart_data(symbol, tf, min(limit, 400))
 
 
 class ConfigPatch(BaseModel):

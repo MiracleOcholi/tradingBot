@@ -43,6 +43,18 @@ class SupabaseClient:
         r.raise_for_status()
         return r.json()
 
+    async def upsert(self, table: str, row: dict | list[dict], on_conflict: str) -> list[dict]:
+        r = await self._client.post(
+            f"{self._base}/{table}?on_conflict={on_conflict}",
+            headers={
+                **self._headers,
+                "Prefer": "return=representation,resolution=merge-duplicates",
+            },
+            json=row,
+        )
+        r.raise_for_status()
+        return r.json()
+
     async def update(self, table: str, query: str, patch: dict) -> list[dict]:
         r = await self._client.patch(
             f"{self._base}/{table}?{query}",

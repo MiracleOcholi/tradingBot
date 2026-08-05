@@ -119,3 +119,28 @@ async def test_without_a_token_the_session_is_unusable():
     assert s.usable is False
     assert await s.websocket_url() is None
     assert "no PAT" in s.last_error
+
+
+def test_describe_shape_reports_types_never_values():
+    from app.services.deriv_session import describe_shape
+
+    shape = describe_shape({"data": {"otp_code": "SECRET-VALUE", "ttl": 60},
+                            "rows": [{"id": "x"}]})
+    assert shape == {"data": {"otp_code": "str", "ttl": "int"},
+                     "rows": [{"id": "str"}]}
+    assert "SECRET-VALUE" not in str(shape)
+
+
+async def test_unknown_otp_field_records_shape_not_value(patched):
+    patched(otp_payload={"result": {"pass_code": "SECRET"}})
+    s = DerivSession("app-id", "pat", demo=True)
+    assert await s.websocket_url() is None
+    assert s.otp_response_shape == {"result": {"pass_code": "str"}}
+    assert "SECRET" not in str(s.status())
+
+
+async def test_alternate_otp_field_names_are_found(patched):
+    patched(otp_payload={"data": {"otp_code": "ALT"}})
+    s = DerivSession("app-id", "pat", demo=True)
+    url = await s.websocket_url()
+    assert url.endswith("otp=ALT")

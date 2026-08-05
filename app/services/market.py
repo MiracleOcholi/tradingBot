@@ -189,15 +189,13 @@ class MarketService:
         token = await self._market_token()
         if not token:
             return None
-        cfg = {}
-        try:
-            cfg = await self.db.get_config()
-        except Exception:
-            log.exception("could not read config for account mode; assuming DEMO")
+        # The data socket always uses the DEMO account: candle data is
+        # identical on either, so there is no reason to point the market
+        # feed at the real account regardless of the configured mode.
         session = DerivSession(
             app_id=get_settings().deriv_app_id_clean,
             token=token,
-            demo=cfg.get("account_mode", "DEMO") != "LIVE",
+            demo=True,
         )
         url = await session.websocket_url()
         self.session_status = session.status()

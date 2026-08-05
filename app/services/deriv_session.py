@@ -36,6 +36,21 @@ WS_BASE = "wss://api.derivws.com/trading/v1/options/ws"
 LEGACY_WS = "wss://ws.derivws.com/websockets/v3"
 
 
+def describe_shape(payload: Any, depth: int = 0) -> Any:
+    """Key names and value TYPES only — never values.
+
+    Used to learn an undocumented response layout without ever writing the
+    credential it carries into logs or status output.
+    """
+    if depth > 4:
+        return "..."
+    if isinstance(payload, dict):
+        return {k: describe_shape(v, depth + 1) for k, v in payload.items()}
+    if isinstance(payload, list):
+        return [describe_shape(payload[0], depth + 1)] if payload else []
+    return type(payload).__name__
+
+
 def _find_key(payload: Any, *names: str) -> Any:
     """Depth-first search for the first matching key. The payloads nest
     under `data`/`meta` inconsistently and are not schema-documented."""
@@ -65,6 +80,7 @@ class DerivSession:
         self.accounts: list[dict] = []
         self.account_id: str | None = None
         self.last_error: str | None = None
+        self.otp_response_shape: Any = None
 
     @property
     def usable(self) -> bool:
@@ -109,7 +125,17 @@ class DerivSession:
             headers=self._headers(), json={},
         )
         r.raise_for_status()
-        otp = _find_key(r.json(), "otp", "one_time_password", "token")
+        body = r.json()
+        otp = _find_key(
+            body, "otp", "one_time_password", "otp_code", "ws_otp",
+            "code", "token", "access_token", "value",
+        )
+        if not otp:
+            # No published schema, so when the expected field is absent we
+            # record the response SHAPE — key names and value types only,
+            # never values, since one of them is the credential itself.
+            self.otp_response_shape = describe_shape(body)
+            log.error("OTP field not found; response shape: %s", self.otp_response_shape)
         return str(otp) if otp else None
 
     async def websocket_url(self) -> str | None:
@@ -157,4 +183,5 @@ class DerivSession:
                 for a in self.accounts
             ],
             "last_error": self.last_error,
+            "otp_response_shape": self.otp_response_shape,
         }

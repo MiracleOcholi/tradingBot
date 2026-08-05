@@ -121,12 +121,18 @@ class DerivClient:
         self.on_tick = None       # async (symbol, quote: float, epoch: int)
         self.on_contract = None   # async (contract: dict)
         self.authorized_loginid: str | None = None
+        self.last_error: str | None = None
+        self.connect_attempts = 0
 
     def status(self) -> dict:
         return {
             "connected": self.connected,
             "last_message_at": self.last_message_at.isoformat() if self.last_message_at else None,
             "streams": len(self.streams),
+            "connect_attempts": self.connect_attempts,
+            # Surfaced so a failing socket is diagnosable from /health alone,
+            # without shell access to the Render logs.
+            "last_error": self.last_error,
         }
 
     def candles(
@@ -145,11 +151,13 @@ class DerivClient:
         backoff = 1
         while True:
             try:
+                self.connect_attempts += 1
                 await self._session()
                 backoff = 1
             except asyncio.CancelledError:
                 raise
             except Exception as e:
+                self.last_error = f"{type(e).__name__}: {e}"
                 log.warning("deriv ws dropped (%r); reconnecting in %ss", e, backoff)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60)
@@ -158,6 +166,7 @@ class DerivClient:
         async with websockets.connect(self.url, ping_interval=30, ping_timeout=15) as ws:
             self._ws = ws
             self.connected = True
+            self.last_error = None
             self.authorized_loginid = None  # a new socket is unauthorized
             log.info("deriv ws connected")
             try:

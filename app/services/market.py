@@ -69,6 +69,7 @@ class MarketService:
         self.deriv: DerivClient | None = None
         self.strategy = None   # StrategyService, wired by the watcher
         self.execution = None  # ExecutionService, wired by the watcher
+        self.analytics = None  # ExcursionTracker, wired by the watcher
         self.candles_processed = 0
         self._dirty_cursors: set[str] = set()
         self._lock = asyncio.Lock()
@@ -117,6 +118,8 @@ class MarketService:
             self.deriv.on_tick = self.execution.on_tick
             self.deriv.on_contract = self.execution.on_contract
             await self.execution.load()
+        if self.analytics is not None:
+            await self.analytics.load()
         await self.deriv.run()
 
     # ---------------------------------------------------------------- ingest
@@ -144,6 +147,12 @@ class MarketService:
                     await self.strategy.on_candle(symbol, tf, candle, is_history)
                 except Exception:
                     log.exception("strategy failed for %s %s @ %s", symbol, tf, candle.ts)
+
+            if self.analytics is not None and tf == "M15" and not is_history:
+                try:
+                    await self.analytics.on_m15_close(symbol, candle)
+                except Exception:
+                    log.exception("excursion tracking failed for %s @ %s", symbol, candle.ts)
 
             self.candles_processed += 1
             self.cursor[key] = candle.ts

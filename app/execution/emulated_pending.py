@@ -92,7 +92,9 @@ class ExecutionService:
 
     async def cancel(self, vo_id: str, status: str, reason: str) -> None:
         vo = self.armed.pop(vo_id, None)
-        await self.db.update("virtual_orders", f"id=eq.{vo_id}", {"status": status})
+        await self.db.update(
+            "virtual_orders", f"id=eq.{vo_id}", {"status": status, "reason": reason}
+        )
         if vo:
             await self.db.update(
                 "signals", f"id=eq.{vo['signal_id']}",

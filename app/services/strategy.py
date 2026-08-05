@@ -217,7 +217,7 @@ class StrategyService:
             "stale_replay": stale,
         }
         self.signals_confirmed += 1
-        await signal_svc.create_setup_signal(
+        sig = await signal_svc.create_setup_signal(
             symbol=symbol,
             side=plan.side,
             entry=plan.entry,
@@ -227,6 +227,9 @@ class StrategyService:
             context=context,
             expired=stale,
         )
+        if not stale:
+            from app.services.analytics import get_tracker
+            get_tracker().register(sig)
 
     async def _persist(self, symbol: str, strat: SymbolStrategy) -> None:
         patch = strat.to_row_patch()

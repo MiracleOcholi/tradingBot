@@ -61,13 +61,20 @@ class CandleStream:
 
     def ingest_history(self, candles: list[dict]) -> list[Candle]:
         """Initial `candles` payload: all but the last are completed; the last
-        is the currently forming candle."""
+        is the currently forming candle.
+
+        On RECONNECT the same stream object receives an overlapping batch —
+        only candles newer than what we already hold are appended, keeping
+        the cache strictly chronological (the swing/engulfing logic relies
+        on adjacency)."""
         parsed = [_to_candle(c) for c in candles]
         if not parsed:
             return []
         done, self.forming = parsed[:-1], parsed[-1]
-        self.completed.extend(done)
-        return done
+        last = self.completed[-1].ts if self.completed else None
+        fresh = [c for c in done if last is None or c.ts > last]
+        self.completed.extend(fresh)
+        return fresh
 
     def ingest_ohlc(self, ohlc: dict) -> Candle | None:
         """Streaming update. Returns the just-COMPLETED candle, if any."""

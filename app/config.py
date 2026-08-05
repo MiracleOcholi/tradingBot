@@ -35,6 +35,21 @@ class Settings(BaseSettings):
     dashboard_password: str = ""
 
     @property
+    def deriv_app_id_clean(self) -> str:
+        """DERIV_APP_ID as Deriv expects it: digits only.
+
+        Values pasted into a hosting dashboard often arrive wrapped in
+        quotes or with stray whitespace ("12345", ' 12345 '), and Deriv
+        answers the handshake with the same HTTP 401 as an unregistered id
+        — so normalise before use and report what was parsed.
+        """
+        return self.deriv_app_id.strip().strip("\"'").strip()
+
+    @property
+    def deriv_app_id_valid(self) -> bool:
+        return self.deriv_app_id_clean.isdigit()
+
+    @property
     def telegram_configured(self) -> bool:
         return bool(self.telegram_bot_token and self.telegram_chat_id)
 

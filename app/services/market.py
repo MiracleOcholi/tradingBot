@@ -105,12 +105,17 @@ class MarketService:
 
     async def run(self) -> None:
         settings = get_settings()
-        if not settings.deriv_app_id:
+        if not settings.deriv_app_id_clean:
             log.warning("DERIV_APP_ID not set — market service idle")
             return
+        if not settings.deriv_app_id_valid:
+            log.error(
+                "DERIV_APP_ID=%r is not numeric — Deriv will reject the handshake",
+                settings.deriv_app_id_clean,
+            )
         await self.load()
         self.deriv = DerivClient(
-            settings.deriv_app_id, self.symbols, self.on_candle,
+            settings.deriv_app_id_clean, self.symbols, self.on_candle,
             on_history_done=self.on_history_done,
         )
         if self.execution is not None:

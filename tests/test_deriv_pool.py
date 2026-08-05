@@ -27,9 +27,10 @@ def test_shard_symbols_splits_evenly():
 
 
 def test_no_shard_exceeds_the_subscription_cap():
+    """Only STREAMED timeframes consume subscription slots."""
     p = pool()
     for shard in p.shards:
-        assert len(shard) * len(TFS) <= 8
+        assert len(shard) * len(p.clients[0].stream_timeframes) <= 8
 
 
 def test_every_symbol_is_covered_exactly_once():
@@ -39,9 +40,10 @@ def test_every_symbol_is_covered_exactly_once():
     assert len(flat) == len(set(flat))
 
 
-def test_six_symbols_need_three_connections():
+def test_six_symbols_fit_two_connections_when_only_m15_h1_stream():
     p = pool()
-    assert len(p.clients) == 3          # 2 symbols × 4 tfs = 8 subs each
+    # 2 streamed tfs → 4 symbols per shard → 6 symbols need 2 connections
+    assert len(p.clients) == 2
 
 
 def test_symbol_routes_to_its_owning_shard():
@@ -49,6 +51,13 @@ def test_symbol_routes_to_its_owning_shard():
     owner = p._client_for("JD100")
     assert "JD100" in owner.symbols
     assert p._client_for("R_10") is not owner
+
+
+def test_slow_timeframes_are_polled_not_streamed():
+    p = pool()
+    c = p.clients[0]
+    assert c.stream_timeframes == ["M15", "H1"]
+    assert c.poll_timeframes == ["H4", "D1"]
 
 
 def test_unknown_symbol_falls_back_to_primary():
@@ -72,16 +81,16 @@ def test_status_aggregates_across_shards():
     p = pool()
     p.clients[0].streams[("R_10", "M15")] = object()
     p.clients[1].subscriptions_sent = 8
-    p.clients[2].skipped_symbols = ["JD100"]
+    p.clients[1].skipped_symbols = ["JD100"]
     s = p.status()
-    assert s["connections"] == 3
+    assert s["connections"] == len(p.clients)
     assert s["streams"] == 1
     assert s["subscribed"] == 8
     assert s["skipped_symbols"] == ["JD100"]
-    assert len(s["shards"]) == 3
+    assert len(s["shards"]) == len(p.clients)
 
 
 def test_tight_cap_yields_one_symbol_per_connection():
-    p = pool(max_subs=4)
+    p = pool(max_subs=2)          # 2 streamed tfs → 1 symbol per shard
     assert len(p.clients) == len(SYMBOLS)
     assert all(len(shard) == 1 for shard in p.shards)

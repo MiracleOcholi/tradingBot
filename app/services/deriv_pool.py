@@ -22,7 +22,12 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from app.core.models import Candle
-from app.services.deriv import GRANULARITY, PUBLIC_FALLBACK_APP_ID, DerivClient
+from app.services.deriv import (
+    GRANULARITY,
+    PUBLIC_FALLBACK_APP_ID,
+    STREAM_TIMEFRAMES,
+    DerivClient,
+)
 
 log = logging.getLogger("maverick.deriv.pool")
 
@@ -51,7 +56,9 @@ class DerivPool:
         max_subscriptions: int = MAX_SUBSCRIPTIONS_PER_CONNECTION,
     ) -> None:
         self.timeframes = timeframes or list(GRANULARITY)
-        per_shard = max(1, max_subscriptions // max(1, len(self.timeframes)))
+        # Only streamed timeframes occupy subscription slots.
+        streamed = [tf for tf in self.timeframes if tf in STREAM_TIMEFRAMES] or self.timeframes
+        per_shard = max(1, max_subscriptions // max(1, len(streamed)))
         self.shards = shard_symbols(symbols, per_shard)
         self.clients: list[DerivClient] = [
             DerivClient(

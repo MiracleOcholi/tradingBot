@@ -36,6 +36,16 @@ class DerivAPIError(Exception):
 GRANULARITY = {"M15": 900, "H1": 3600, "H4": 14400, "D1": 86400}
 SUBSCRIBE_STAGGER_S = 0.35   # spread the initial subscription burst
 
+# Concurrent subscriptions are capped per ACCOUNT, not per connection:
+# coverage saturated around 15-19 whether the work was spread over one
+# socket or four. Slots are therefore spent only on timeframes that need
+# tick-by-tick freshness; D1 and H4 close every 24h/4h, so they are
+# re-fetched on a timer instead. ingest_history already de-duplicates by
+# timestamp, so a poll and a stream update are interchangeable.
+STREAM_TIMEFRAMES = ("M15", "H1")
+POLL_TIMEFRAMES = ("H4", "D1")
+POLL_INTERVAL_S = 120
+
 # Deriv's public documentation app id. Candle data is public, so when the
 # configured app id is refused by this endpoint (the current dashboard
 # issues ids for the newer REST/WS API, which the legacy socket rejects
@@ -125,6 +135,11 @@ class DerivClient:
         self.active_app_id = app_id
         self.symbols = symbols
         self.timeframes = timeframes or list(GRANULARITY)
+        # Streamed timeframes consume the scarce per-account subscription
+        # slots; the rest are re-fetched on a timer.
+        self.stream_timeframes = [tf for tf in self.timeframes if tf in STREAM_TIMEFRAMES]
+        self.poll_timeframes = [tf for tf in self.timeframes if tf in POLL_TIMEFRAMES]
+        self._poll_task: asyncio.Task | None = None
         self.on_candle = on_candle
         self.on_history_done = on_history_done
         self.history_count = history_count
@@ -182,6 +197,8 @@ class DerivClient:
             "last_error": self.last_error,
             "api_errors": list(self.recent_errors),
             "subscribed": self.subscriptions_sent,
+            "streamed_tfs": self.stream_timeframes,
+            "polled_tfs": self.poll_timeframes,
             # Configured codes Deriv does not recognise, and the real
             # synthetic-index codes it does offer — so a wrong code names
             # its own replacement.
@@ -271,6 +288,9 @@ class DerivClient:
                 await reader
             finally:
                 reader.cancel()
+                if self._poll_task:
+                    self._poll_task.cancel()
+                    self._poll_task = None
                 self.connected = False
                 self._ws = None
                 self.authorized_loginid = None
@@ -388,29 +408,57 @@ class DerivClient:
             })
             log.error("market socket authorize failed (%s); continuing unauthorized", e)
 
+    async def _history_request(self, ws, symbol: str, tf: str, subscribe: bool) -> None:
+        self._req_id += 1
+        payload = {
+            "ticks_history": symbol,
+            "adjust_start_time": 1,
+            "count": self.history_count,
+            "end": "latest",
+            "granularity": GRANULARITY[tf],
+            "style": "candles",
+            "req_id": self._req_id,
+            "passthrough": {"symbol": symbol, "tf": tf},
+        }
+        if subscribe:
+            payload["subscribe"] = 1
+        await ws.send(json.dumps(payload))
+
+    async def _poll_loop(self, ws, symbols: list[str]) -> None:
+        """Re-fetch the slow timeframes instead of holding a subscription
+        slot for each. A closed H4/D1 candle arriving up to POLL_INTERVAL_S
+        late is immaterial to a strategy built on those closes."""
+        while True:
+            await asyncio.sleep(POLL_INTERVAL_S)
+            for symbol in symbols:
+                for tf in self.poll_timeframes:
+                    try:
+                        await self._history_request(ws, symbol, tf, subscribe=False)
+                    except Exception:
+                        return  # socket gone; the session loop handles it
+                    await asyncio.sleep(SUBSCRIBE_STAGGER_S)
+
     async def _bootstrap(self, ws) -> None:
         """Authorize if we can, probe symbols, then (re)establish subscriptions."""
         await self._authorize_if_possible()
         symbols = await self.resolve_symbols()
         self.subscriptions_sent = 0
+        # Streamed timeframes first — they hold the scarce subscription
+        # slots — then one immediate fetch of the polled ones so history is
+        # complete without waiting a full poll interval.
         for symbol in symbols:
-            for tf in self.timeframes:
-                self._req_id += 1
-                await ws.send(json.dumps({
-                    "ticks_history": symbol,
-                    "adjust_start_time": 1,
-                    "count": self.history_count,
-                    "end": "latest",
-                    "granularity": GRANULARITY[tf],
-                    "style": "candles",
-                    "subscribe": 1,
-                    "req_id": self._req_id,
-                    "passthrough": {"symbol": symbol, "tf": tf},
-                }))
+            for tf in self.stream_timeframes:
+                await self._history_request(ws, symbol, tf, subscribe=True)
                 self.subscriptions_sent += 1
-                # Deriv rate-limits bursts; requests fired back to back can
-                # be rejected wholesale.
                 await asyncio.sleep(SUBSCRIBE_STAGGER_S)
+        for symbol in symbols:
+            for tf in self.poll_timeframes:
+                await self._history_request(ws, symbol, tf, subscribe=False)
+                await asyncio.sleep(SUBSCRIBE_STAGGER_S)
+        if self.poll_timeframes:
+            self._poll_task = asyncio.create_task(
+                self._poll_loop(ws, symbols), name="deriv-poll"
+            )
         for symbol in list(self._tick_symbols):
             await ws.send(json.dumps({"ticks": symbol, "subscribe": 1}))
         for cid in list(self._contract_ids):

@@ -9,7 +9,7 @@ Rules (PDF §6.9, §8.4 + HANDOFF-V2):
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 from app.core.models import Side
 

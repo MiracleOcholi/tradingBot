@@ -3,20 +3,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 
-class Side(str, Enum):
+class Side(StrEnum):
     BUY = "BUY"
     SELL = "SELL"
 
 
-class Direction(str, Enum):
+class Direction(StrEnum):
     BULLISH = "BULLISH"
     BEARISH = "BEARISH"
 
 
-class Formation(str, Enum):
+class Formation(StrEnum):
     """How the SNR formed (PDF §2). Role can later flip via SBR/RBS."""
     TRAD_R = "TRAD_R"  # bullish → bearish
     TRAD_S = "TRAD_S"  # bearish → bullish
@@ -24,7 +24,7 @@ class Formation(str, Enum):
     OC_S = "OC_S"      # bullish → bullish
 
 
-class SetupState(str, Enum):
+class SetupState(StrEnum):
     """Setup state machine (PDF §8.3)."""
     IDLE = "IDLE"
     DIRECTION_SET = "DIRECTION_SET"

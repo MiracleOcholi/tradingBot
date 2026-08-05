@@ -37,7 +37,7 @@ from datetime import datetime
 
 from app.core.breaks import last_swing_high, last_swing_low, m15_wick_to_body_break
 from app.core.engulfing import detect_engulfing
-from app.core.entry import TradePlan, build_plan
+from app.core.entry import build_plan
 from app.core.models import Candle, SetupState, Side, SNRLevel
 
 
@@ -73,7 +73,7 @@ class PendingSetup:
         }
 
     @classmethod
-    def from_payload(cls, p: dict) -> "PendingSetup":
+    def from_payload(cls, p: dict) -> PendingSetup:
         return cls(
             side=Side(p["side"]),
             level_id=p.get("level_id"),
@@ -229,7 +229,7 @@ class SetupMachine:
                             break
             if swing is None:
                 return []
-            kind, price, swing_candle = swing
+            _kind, price, swing_candle = swing
             pend.swing_price = price
             pend.swing_candle = _candle_dict(swing_candle)
 

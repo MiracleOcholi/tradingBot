@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.config import get_settings
 from app.core.models import Candle, Formation, SNRLevel
@@ -206,7 +206,7 @@ class MarketService:
         await self.db.update(
             "engine_state",
             f"symbol=eq.{symbol}",
-            {"state_payload": payload, "updated_at": datetime.now(timezone.utc).isoformat()},
+            {"state_payload": payload, "updated_at": datetime.now(UTC).isoformat()},
         )
 
     # ---------------------------------------------------------------- charts
@@ -217,15 +217,15 @@ class MarketService:
             tracker = self.trackers.get((symbol, snr_tf))
             if not tracker:
                 continue
-            for l in tracker.active_levels():
+            for lvl in tracker.active_levels():
                 levels.append({
                     "timeframe": snr_tf,
-                    "price": l.price,
-                    "role": l.role,
-                    "formation": l.formation.value,
-                    "fresh": l.fresh,
-                    "break_count": l.break_count,
-                    "played": l.played,
+                    "price": lvl.price,
+                    "role": lvl.role,
+                    "formation": lvl.formation.value,
+                    "fresh": lvl.fresh,
+                    "break_count": lvl.break_count,
+                    "played": lvl.played,
                 })
         return {
             "symbol": symbol,

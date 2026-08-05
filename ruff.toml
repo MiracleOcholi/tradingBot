@@ -1,0 +1,19 @@
+line-length = 100
+target-version = "py312"
+
+[lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+  "RUF001", "RUF002", "RUF003",  # unicode em-dashes/arrows in docstrings are intentional
+]
+
+[lint.per-file-ignores]
+# Long-lived services deliberately catch broad exceptions to stay alive.
+"app/bootstrap.py" = ["BLE001"]
+"app/services/*" = ["BLE001"]
+"app/execution/*" = ["BLE001"]
+
+[lint.extend-per-file-ignores]
+# `l` is the natural OHLC parameter name in candle test helpers.
+"tests/helpers.py" = ["E741"]
+"tests/test_deriv_stream.py" = ["E741"]

@@ -128,9 +128,9 @@ class SNRTracker:
                 )
                 self.levels.append(upd.new_level)
 
-        active = [l for l in self.levels if l.active]
+        active = [lvl for lvl in self.levels if lvl.active]
         if len(active) > self.max_active:
-            for stale in sorted(active, key=lambda l: l.first_candle_at)[: len(active) - self.max_active]:
+            for stale in sorted(active, key=lambda lvl: lvl.first_candle_at)[: len(active) - self.max_active]:
                 stale.active = False
                 upd.deactivated.append(stale)
 
@@ -139,20 +139,20 @@ class SNRTracker:
 
     # ------------------------------------------------------------------
     def active_levels(self) -> list[SNRLevel]:
-        return [l for l in self.levels if l.active]
+        return [lvl for lvl in self.levels if lvl.active]
 
     def last_traditional(self, role: str, before: datetime | None = None) -> SNRLevel | None:
         """Most recent ACTIVE Traditional SNR currently holding `role`,
         formed strictly before `before` (used for the H4 direction break:
         'the last H4 Traditional SNR before the tap')."""
         best: SNRLevel | None = None
-        for l in self.levels:
-            if not l.active or l.role != role:
+        for lvl in self.levels:
+            if not lvl.active or lvl.role != role:
                 continue
-            if l.formation not in (Formation.TRAD_R, Formation.TRAD_S):
+            if lvl.formation not in (Formation.TRAD_R, Formation.TRAD_S):
                 continue
-            if before is not None and l.first_candle_at >= before:
+            if before is not None and lvl.first_candle_at >= before:
                 continue
-            if best is None or l.first_candle_at > best.first_candle_at:
-                best = l
+            if best is None or lvl.first_candle_at > best.first_candle_at:
+                best = lvl
         return best

@@ -38,8 +38,13 @@ cycles — levels, state machines, virtual orders, reminders reload on boot.
    `db/seed.sql` (idempotent; seed uses `ON CONFLICT DO NOTHING`). The app
    only *verifies* at startup (`app/bootstrap.py`) — API keys can't run DDL.
 2. **Deploy** — Render: New + → Blueprint → this repo (`render.yaml`), or a
-   manual web service with the same build/start commands. Env vars: copy the
-   names from `.env.example` into the Render dashboard.
+   manual web service with: runtime Python · branch `main` · root dir empty ·
+   build `pip install -r requirements.txt` · start
+   `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1` ·
+   health check `/health` · free plan. Env vars: every name in
+   `.env.example` plus `PYTHON_VERSION=3.12.8`. Set `DASHBOARD_PASSWORD` —
+   without it the whole `/api` surface (signals, trades, analytics, controls)
+   is public.
 3. **Telegram webhook** —
    `https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<app>.onrender.com/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>`
 4. **Keep-alive** — deploy `worker/keepalive-worker.js` to Cloudflare with the

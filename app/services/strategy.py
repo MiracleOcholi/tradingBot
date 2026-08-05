@@ -12,7 +12,7 @@ STALE_SIGNAL_S) are logged as EXPIRED and never alerted or armed.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.core.direction import DirectionCandidate, DirectionEngine, DirectionState
 from app.core.models import Candle, SetupState
@@ -49,7 +49,7 @@ class SymbolStrategy:
             "direction": ds.direction,
             "direction_since": ds.since.isoformat() if ds.since else None,
             "setup_state": self.setup.state.value,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
             "_payload_patch": payload,  # merged into state_payload by the caller
         }
 
@@ -106,8 +106,8 @@ class StrategyService:
         if not tracker:
             return []
         return [
-            l for l in tracker.active_levels()
-            if l.fresh and not l.played and (role is None or l.role == role)
+            lvl for lvl in tracker.active_levels()
+            if lvl.fresh and not lvl.played and (role is None or lvl.role == role)
         ]
 
     def _candles(self, symbol: str, tf: str) -> list[Candle]:
@@ -172,10 +172,10 @@ class StrategyService:
             return
         tracker = self._tracker(symbol, "D1")
         if tracker:
-            for l in tracker.levels:
-                if l.id == level_id and l.touches == 0:
-                    l.touches = 1
-                    l.fresh = False
+            for lvl in tracker.levels:
+                if lvl.id == level_id and lvl.touches == 0:
+                    lvl.touches = 1
+                    lvl.fresh = False
         try:
             await self.db.update(
                 "snr_levels", f"id=eq.{level_id}&touches=eq.0",
@@ -189,10 +189,10 @@ class StrategyService:
             return
         tracker = self._tracker(symbol, "D1")
         if tracker:
-            for l in tracker.levels:
-                if l.id == level_id:
-                    l.played = True
-                    l.fresh = False
+            for lvl in tracker.levels:
+                if lvl.id == level_id:
+                    lvl.played = True
+                    lvl.fresh = False
         try:
             await self.db.update(
                 "snr_levels", f"id=eq.{level_id}", {"played": True, "fresh": False}
@@ -207,7 +207,7 @@ class StrategyService:
 
         plan = data["plan"]
         await self._mark_played(symbol, data.get("level_id"))
-        age_s = (datetime.now(timezone.utc) - candle.ts).total_seconds()
+        age_s = (datetime.now(UTC) - candle.ts).total_seconds()
         stale = is_history and age_s > STALE_SIGNAL_S
         context = {
             "direction": strat.direction.state.direction,

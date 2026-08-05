@@ -17,7 +17,7 @@ Two parts:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from statistics import median
 
 from app.core.models import Candle
@@ -41,7 +41,7 @@ class ExcursionTracker:
 
     async def load(self) -> None:
         """Resume tracking for recent real signals after a restart."""
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=TRACK_H)).isoformat()
+        cutoff = (datetime.now(UTC) - timedelta(hours=TRACK_H)).isoformat()
         rows = await self.db.select(
             "signals",
             f"is_mock=is.false&created_at=gte.{cutoff}"
@@ -69,7 +69,7 @@ class ExcursionTracker:
         }
 
     async def on_m15_close(self, symbol: str, candle: Candle) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for sig_id, rec in list(self.active.items()):
             if rec["symbol"] != symbol:
                 continue
@@ -213,8 +213,9 @@ def build_suggestions(signals: list[dict], stats: dict) -> list[dict]:
     # 2) Engulfing-type edge, only with a real sample on both sides.
     be = stats.get("by_engulf_type", {})
     t1, t2 = be.get("type_1"), be.get("type_2")
-    if t1 and t2 and t1["trades"] >= MIN_SAMPLE_TRADES and t2["trades"] >= MIN_SAMPLE_TRADES:
-        if abs((t1["win_rate"] or 0) - (t2["win_rate"] or 0)) >= 0.15:
+    if (t1 and t2 and t1["trades"] >= MIN_SAMPLE_TRADES
+            and t2["trades"] >= MIN_SAMPLE_TRADES
+            and abs((t1["win_rate"] or 0) - (t2["win_rate"] or 0)) >= 0.15):
             better, worse = (("Type 1", t1), ("Type 2", t2))
             if (t2["win_rate"] or 0) > (t1["win_rate"] or 0):
                 better, worse = ("Type 2", t2), ("Type 1", t1)

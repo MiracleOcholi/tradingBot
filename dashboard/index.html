@@ -254,11 +254,12 @@ const $ = id => document.getElementById(id);
 const toast = m => { const t=$("toast"); t.textContent=m; t.style.display="block";
                      clearTimeout(t._h); t._h=setTimeout(()=>t.style.display="none", 3200); };
 const authHeaders = () => {
-  const k = $("auth").value || localStorage.getItem("mav_key") || "";
-  if ($("auth").value) localStorage.setItem("mav_key", $("auth").value);
+  const k = ($("auth") && $("auth").value) || localStorage.getItem("mav_key") || "";
+  if ($("auth") && $("auth").value) localStorage.setItem("mav_key", $("auth").value);
   return k ? {"Authorization":"Bearer "+k, "Content-Type":"application/json"}
            : {"Content-Type":"application/json"};
 };
+$("auth") && ($("auth").onchange = () => { refresh(); loadChart(); loadAnalytics(); });
 async function post(path, body){
   const r = await fetch(path, {method:"POST", headers:authHeaders(), body:body?JSON.stringify(body):null});
   if(!r.ok){ toast("ERR "+r.status+" · "+((await r.json()).detail||"")); throw new Error(r.status); }
@@ -309,7 +310,8 @@ function render(){
 
 async function refresh(){
   try{
-    const r = await fetch("/api/state");
+    const r = await fetch("/api/state", {headers: authHeaders()});
+    if(r.status===401){ $("chip-watch").textContent="LOCKED — SET DASHBOARD KEY"; $("chip-watch").className="chip warn"; return; }
     if(r.ok){ state = await r.json(); render(); }
   }catch(e){ /* keep last render */ }
 }
@@ -368,7 +370,7 @@ function renderChartControls(){
 async function loadChart(){
   renderChartControls();
   try{
-    const r = await fetch(`/api/candles?symbol=${chartSym}&tf=${chartTf}&limit=160`);
+    const r = await fetch(`/api/candles?symbol=${chartSym}&tf=${chartTf}&limit=160`, {headers: authHeaders()});
     if(r.ok){ chartData = await r.json(); drawChart(); }
   }catch(e){}
 }
@@ -433,7 +435,7 @@ window.addEventListener("resize", ()=>{ if(chartData) drawChart(); });
 
 async function loadAnalytics(){
   try{
-    const r = await fetch("/api/analytics");
+    const r = await fetch("/api/analytics", {headers: authHeaders()});
     if(!r.ok) return;
     const a = await r.json(), o = a.stats.overall || {};
     const pct = x => x==null ? "—" : (x*100).toFixed(0)+"%";

@@ -1,9 +1,9 @@
 """Synthetic-candle helpers for engine tests."""
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.core.models import Candle
 
-T0 = datetime(2026, 8, 1, tzinfo=timezone.utc)
+T0 = datetime(2026, 8, 1, tzinfo=UTC)
 
 
 def mk(i: int, o: float, h: float, l: float, c: float, step_s: int = 900) -> Candle:

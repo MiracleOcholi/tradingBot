@@ -1,16 +1,16 @@
 """Direction engine: tap + H4 body-to-body break, validity, mirror flip."""
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.core.direction import DirectionEngine
 from app.core.models import Formation, SNRLevel
-from tests.helpers import T0, bear, bull, mk
+from tests.helpers import bear, bull, mk
 
 
 def d1_level(price: float, role: str, fresh: bool = True, lid: str = "L1") -> SNRLevel:
     return SNRLevel(
         symbol="R_10", timeframe="D1", price=price,
         formation=Formation.TRAD_S if role == "S" else Formation.TRAD_R,
-        role=role, first_candle_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        role=role, first_candle_at=datetime(2026, 7, 1, tzinfo=UTC),
         fresh=fresh, id=lid,
     )
 
@@ -19,7 +19,7 @@ def h4_trad(price: float, role: str) -> SNRLevel:
     return SNRLevel(
         symbol="R_10", timeframe="H4", price=price,
         formation=Formation.TRAD_R if role == "R" else Formation.TRAD_S,
-        role=role, first_candle_at=datetime(2026, 7, 20, tzinfo=timezone.utc),
+        role=role, first_candle_at=datetime(2026, 7, 20, tzinfo=UTC),
     )
 
 

@@ -19,13 +19,14 @@ router = APIRouter(prefix="/api")
 
 
 def require_auth(authorization: str = Header(default="")) -> None:
-    """Bearer check for mutating endpoints; open when no password is set (dev)."""
+    """Bearer check for ALL /api endpoints (reads included — signals, trades
+    and analytics are private trading data); open when no password is set."""
     pw = get_settings().dashboard_password
     if pw and authorization != f"Bearer {pw}":
         raise HTTPException(status_code=401, detail="unauthorized")
 
 
-@router.get("/state")
+@router.get("/state", dependencies=[Depends(require_auth)])
 async def get_state() -> dict[str, Any]:
     db = get_db()
     cfg = await db.get_config()
@@ -41,7 +42,7 @@ async def get_state() -> dict[str, Any]:
     }
 
 
-@router.get("/candles")
+@router.get("/candles", dependencies=[Depends(require_auth)])
 async def get_candles(symbol: str, tf: str = "M15", limit: int = 200) -> dict:
     if symbol not in WATCHLIST:
         raise HTTPException(400, f"unknown symbol: {symbol}")
@@ -95,7 +96,7 @@ async def set_account_mode(body: AccountMode) -> dict:
     return await get_db().update_config(patch)
 
 
-@router.get("/analytics")
+@router.get("/analytics", dependencies=[Depends(require_auth)])
 async def analytics() -> dict:
     """Deterministic outcome stats + entry-improvement suggestions (Phase F)."""
     from app.services import analytics as analytics_svc
@@ -120,7 +121,7 @@ async def store_secret(body: SecretIn) -> dict:
     try:
         encrypted = crypto.encrypt(body.value.strip())
     except RuntimeError as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, str(e)) from e
     await get_db().upsert(
         "secrets",
         {"name": body.name, "value_encrypted": encrypted, "updated_at": "now()"},

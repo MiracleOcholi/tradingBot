@@ -12,7 +12,7 @@ dashboard). On Done: next_due = done_date + 3.5 months, counters reset.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from app.services.supabase import get_db
 from app.services.telegram import get_telegram
@@ -42,7 +42,7 @@ def add_three_and_half_months(d: date) -> date:
 
 async def tick(now: datetime | None = None) -> None:
     """One reminder-engine pass; called periodically by the watcher."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     db, tg = get_db(), get_telegram()
     reminders = await db.select("reminders", "")
     for rem in reminders:
@@ -70,14 +70,14 @@ async def _send(db, tg, rem: dict, sent_count: int) -> None:
     await tg.send_reminder_card(rem_view)
     await db.update("reminders", f"id=eq.{rem['id']}", {
         "resend_count": sent_count,
-        "last_sent_at": datetime.now(timezone.utc).isoformat(),
+        "last_sent_at": datetime.now(UTC).isoformat(),
     })
 
 
 async def mark_done(reminder_id: str) -> date:
     """Handle the ✅ Done button: schedule the next cycle from today."""
     db = get_db()
-    done_on = datetime.now(timezone.utc).date()
+    done_on = datetime.now(UTC).date()
     next_due = add_three_and_half_months(done_on)
     rows = await db.select("reminders", f"id=eq.{reminder_id}")
     history = (rows[0].get("history") or []) if rows else []

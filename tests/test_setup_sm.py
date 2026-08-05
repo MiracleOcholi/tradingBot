@@ -1,17 +1,17 @@
 """Setup state machine: full path §8.3 + all five invalidations §6.8."""
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from app.core.models import Formation, SetupState, Side, SNRLevel
 from app.core.setup_sm import SetupMachine, compute_strong_extreme
-from tests.helpers import T0, bear, bull, mk
+from tests.helpers import bear, bull, mk
 
 
 def daily_support(price: float = 100.0, lid: str = "D1S") -> SNRLevel:
     return SNRLevel(
         symbol="R_10", timeframe="D1", price=price, formation=Formation.TRAD_S,
-        role="S", first_candle_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        role="S", first_candle_at=datetime(2026, 7, 1, tzinfo=UTC),
         fresh=True, id=lid,
     )
 
@@ -19,7 +19,7 @@ def daily_support(price: float = 100.0, lid: str = "D1S") -> SNRLevel:
 def daily_resistance(price: float = 120.0, lid: str = "D1R") -> SNRLevel:
     return SNRLevel(
         symbol="R_10", timeframe="D1", price=price, formation=Formation.TRAD_R,
-        role="R", first_candle_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        role="R", first_candle_at=datetime(2026, 7, 1, tzinfo=UTC),
         fresh=True, id=lid,
     )
 
@@ -47,13 +47,13 @@ def drive_to_break(sm: SetupMachine, level: SNRLevel):
     tap = mk(4, 101, 101.5, 99.9, 100.8)          # touches 100 exactly
     m15.append(tap)
     evs = sm.on_m15_close(tap, m15, [level])
-    assert [e.kind for e in evs][0] == "TAPPED"
+    assert evs[0].kind == "TAPPED"
     assert sm.state == SetupState.M15_BREAK_PENDING
 
     brk = bull(5, 100.8, 105.4)                   # body close 105.4 > wick 105.0
     m15.append(brk)
     evs = sm.on_m15_close(brk, m15, [level])
-    assert [e.kind for e in evs][0] == "M15_BREAK"
+    assert evs[0].kind == "M15_BREAK"
     assert sm.state == SetupState.H1_ENGULF_PENDING
     return m15, brk
 
@@ -162,7 +162,7 @@ def test_inv5_direction_flip_mid_setup():
     level = daily_support()
     drive_to_break(sm, level)
     evs = sm.set_direction("BULLISH")
-    assert [e.kind for e in evs][0] == "INVALIDATED"
+    assert evs[0].kind == "INVALIDATED"
     assert evs[0].data["reason"] == "direction_flip"
     assert sm.state == SetupState.DIRECTION_SET         # new direction armed
 
@@ -171,7 +171,7 @@ def test_inv5_direction_flip_mid_setup():
 def test_engulfing_before_m15_break_does_not_confirm():
     sm = bearish_machine()
     level = daily_support()
-    m15, brk = drive_to_break(sm, level)
+    m15, _brk = drive_to_break(sm, level)
     stale_prev = bear(0, 103, 101, step_s=3600)
     stale_engulf = bull(2, 101, 103.5, step_s=900)      # ts BEFORE the break ts
     assert sm.on_h1_close(stale_engulf, [stale_prev, stale_engulf], m15) == []
@@ -193,12 +193,12 @@ def test_bearish_retracement_mirror_confirms_sell():
     tap = mk(4, 119, 120.1, 118.5, 119.3)                # touches 120
     m15.append(tap)
     evs = sm.on_m15_close(tap, m15, [level])
-    assert [e.kind for e in evs][0] == "TAPPED"
+    assert evs[0].kind == "TAPPED"
 
     brk = bear(5, 119.3, 114.6)                          # closes below wick 114.8
     m15.append(brk)
     evs = sm.on_m15_close(brk, m15, [level])
-    assert [e.kind for e in evs][0] == "M15_BREAK"
+    assert evs[0].kind == "M15_BREAK"
 
     h1 = [bull(0, 116, 118, step_s=3600), bear(6, 118, 115.6, step_s=900)]
     evs = sm.on_h1_close(h1[-1], h1, m15)

@@ -1,5 +1,5 @@
 """Candle-completion logic of the Deriv stream (pure, no network)."""
-from app.services.deriv import CandleStream, GRANULARITY, TF_OF_GRANULARITY
+from app.services.deriv import GRANULARITY, TF_OF_GRANULARITY, CandleStream
 
 
 def _ohlc(open_time: int, o, h, l, c):

@@ -27,13 +27,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.core.entry import TradePlan
 from app.core.models import Side
 from app.core.risk import compute_stake
 from app.services import crypto
-from app.services.deriv import DerivAPIError
 from app.services.supabase import SupabaseClient, get_db
 from app.services.telegram import get_telegram
 
@@ -111,7 +110,7 @@ class ExecutionService:
 
     # ---------------------------------------------------------------- ticks
     async def on_tick(self, symbol: str, quote: float, epoch: int) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for vo_id, vo in list(self.armed.items()):
             if vo["symbol"] != symbol or vo_id in self._firing:
                 continue
@@ -152,7 +151,7 @@ class ExecutionService:
         return None
 
     async def _daily_loss_exceeded(self, cfg: dict, balance: float) -> bool:
-        today = datetime.now(timezone.utc).date().isoformat()
+        today = datetime.now(UTC).date().isoformat()
         closed = await self.db.select(
             "trades",
             f"account_mode=eq.{cfg['account_mode']}&closed_at=gte.{today}T00:00:00Z",
@@ -260,7 +259,7 @@ class ExecutionService:
             self.armed.pop(vo["id"], None)
             await self.db.update("virtual_orders", f"id=eq.{vo['id']}", {
                 "status": "TRIGGERED",
-                "triggered_at": datetime.now(timezone.utc).isoformat(),
+                "triggered_at": datetime.now(UTC).isoformat(),
             })
             trade = (await self.db.insert("trades", {
                 "signal_id": vo["signal_id"],
@@ -297,7 +296,7 @@ class ExecutionService:
         await self.db.update("trades", f"id=eq.{trade_id}", {
             "status": status,
             "pnl": pnl,
-            "closed_at": datetime.now(timezone.utc).isoformat(),
+            "closed_at": datetime.now(UTC).isoformat(),
             "raw": {"final": {k: poc.get(k) for k in
                               ("sell_price", "buy_price", "profit", "status")}},
         })

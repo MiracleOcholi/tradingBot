@@ -19,7 +19,8 @@ from datetime import UTC, datetime
 from app.config import get_settings
 from app.core.models import Candle, Formation, SNRLevel
 from app.core.snr import SNRTracker
-from app.services.deriv import GRANULARITY, DerivClient
+from app.services.deriv import GRANULARITY
+from app.services.deriv_pool import DerivPool
 from app.services.supabase import SupabaseClient, get_db
 
 log = logging.getLogger("maverick.market")
@@ -66,7 +67,7 @@ class MarketService:
         self.db = db or get_db()
         self.trackers: dict[tuple[str, str], SNRTracker] = {}
         self.cursor: dict[tuple[str, str], datetime] = {}
-        self.deriv: DerivClient | None = None
+        self.deriv: DerivPool | None = None
         self.strategy = None   # StrategyService, wired by the watcher
         self.execution = None  # ExecutionService, wired by the watcher
         self.analytics = None  # ExcursionTracker, wired by the watcher
@@ -112,7 +113,9 @@ class MarketService:
         if not settings.deriv_app_id_valid:
             log.error("DERIV_APP_ID looks malformed (empty or contains whitespace)")
         await self.load()
-        self.deriv = DerivClient(
+        # A pool, not a single client: the API silently drops subscriptions
+        # past the eighth on one connection, so the watchlist is sharded.
+        self.deriv = DerivPool(
             settings.deriv_app_id_clean, self.symbols, self.on_candle,
             on_history_done=self.on_history_done,
             token_provider=self._market_token,

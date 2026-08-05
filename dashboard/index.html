@@ -536,8 +536,13 @@ function render(){
   const w = state.watcher || {};
   setChip($("chip-watch"), "Watcher " + (w.last_tick ? "live" : "down"), w.last_tick ? "ok" : "bad");
   const d = (w.market && w.market.deriv) || {};
-  setChip($("chip-deriv"), "Deriv " + (d.connected ? "connected" : "offline"), d.connected ? "ok" : "bad");
-  $("chip-deriv").title = d.last_error ? ("Last error: " + d.last_error) : "";
+  const derivLabel = d.connected
+    ? "Deriv " + (d.streams ? d.streams + " streams" : "no streams")
+    : "Deriv offline";
+  setChip($("chip-deriv"), derivLabel + (d.using_fallback_app_id ? " (public app id)" : ""),
+          d.connected && d.streams ? "ok" : d.connected ? "warn" : "bad");
+  $("chip-deriv").title = d.last_error ? ("Last error: " + d.last_error)
+    : (d.using_fallback_app_id ? "Configured app id was refused; using the public one for market data" : "");
   $("chip-rot").style.display = (state.reminders||[]).some(r=>r.overdue) ? "" : "none";
 
   $("sw-kill").classList.toggle("on", c.kill_switch);

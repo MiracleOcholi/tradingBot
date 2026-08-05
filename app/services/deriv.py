@@ -35,6 +35,12 @@ class DerivAPIError(Exception):
 
 GRANULARITY = {"M15": 900, "H1": 3600, "H4": 14400, "D1": 86400}
 SUBSCRIBE_STAGGER_S = 0.35   # spread the initial subscription burst
+
+# Deriv's public documentation app id. Candle data is public, so when the
+# configured app id is refused by this endpoint (the current dashboard
+# issues ids for the newer REST/WS API, which the legacy socket rejects
+# with HTTP 401) the data socket falls back to this rather than going dark.
+PUBLIC_FALLBACK_APP_ID = "1089"
 TF_OF_GRANULARITY = {v: k for k, v in GRANULARITY.items()}
 
 # on_candle(symbol, timeframe, candle, is_history)
@@ -105,9 +111,12 @@ class DerivClient:
         history_count: int = 300,
         on_history_done: Callable[[str, str], Awaitable[None]] | None = None,
         token_provider: Callable[[], Awaitable[str | None]] | None = None,
+        fallback_app_id: str | None = PUBLIC_FALLBACK_APP_ID,
     ) -> None:
         self.token_provider = token_provider
-        self.url = f"wss://ws.derivws.com/websockets/v3?app_id={app_id}"
+        self.app_id = app_id
+        self.fallback_app_id = fallback_app_id or None
+        self.active_app_id = app_id
         self.symbols = symbols
         self.timeframes = timeframes or list(GRANULARITY)
         self.on_candle = on_candle
@@ -131,9 +140,15 @@ class DerivClient:
         self.skipped_symbols: list[str] = []
         self.available_synthetics: list[str] = []
 
+    @property
+    def url(self) -> str:
+        return f"wss://ws.derivws.com/websockets/v3?app_id={self.active_app_id}"
+
     def status(self) -> dict:
         return {
             "connected": self.connected,
+            "active_app_id": self.active_app_id,
+            "using_fallback_app_id": self.active_app_id != self.app_id,
             "last_message_at": self.last_message_at.isoformat() if self.last_message_at else None,
             "streams": len(self.streams),
             "connect_attempts": self.connect_attempts,
@@ -172,13 +187,24 @@ class DerivClient:
                 raise
             except Exception as e:
                 detail = f"{type(e).__name__}: {e}"
-                if "401" in str(e) or "403" in str(e):
-                    # Deriv refuses the handshake when it does not recognise
-                    # the app id on THIS endpoint — a config error, not a
-                    # blip. Note the legacy socket and the current dashboard
-                    # issue different identifier formats.
+                rejected = "401" in str(e) or "403" in str(e)
+                if rejected and self._switch_to_fallback():
+                    # Candle data is public. Rather than sit at zero because
+                    # this endpoint will not accept the configured app id,
+                    # carry on with the public one and say so loudly.
                     detail += (
-                        " — Deriv rejected DERIV_APP_ID for the legacy WebSocket "
+                        f" — app id {self.app_id!r} refused by the legacy WebSocket "
+                        f"endpoint; retrying with the public app id "
+                        f"{self.active_app_id!r} for market data."
+                    )
+                    self.last_error = detail
+                    log.error(detail)
+                    backoff = 1
+                    await asyncio.sleep(backoff)
+                    continue
+                if rejected:
+                    detail += (
+                        " — Deriv rejected the app id for the legacy WebSocket "
                         "endpoint. Identifiers issued by the current dashboard are "
                         "for the newer REST/WS API and are not interchangeable here."
                     )
@@ -186,6 +212,16 @@ class DerivClient:
                 log.warning("deriv ws dropped (%s); reconnecting in %ss", detail, backoff)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60)
+
+    def _switch_to_fallback(self) -> bool:
+        """Move the socket onto the public app id. Returns False if there is
+        nothing to switch to, or we are already on it."""
+        if not self.fallback_app_id:
+            return False
+        if self.active_app_id == self.fallback_app_id:
+            return False
+        self.active_app_id = self.fallback_app_id
+        return True
 
     async def _session(self) -> None:
         async with websockets.connect(self.url, ping_interval=30, ping_timeout=15) as ws:

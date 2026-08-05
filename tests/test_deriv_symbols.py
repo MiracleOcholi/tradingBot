@@ -102,3 +102,27 @@ async def test_unparseable_payload_never_skips_everything(monkeypatch):
     monkeypatch.setattr(c, "send", lambda *a, **k: _resolved(weird))
     assert await c.resolve_symbols() == ["R_10", "JD10"]
     assert c.skipped_symbols == []
+
+
+async def test_empty_symbol_list_never_mutes_the_feed(monkeypatch):
+    """An empty active_symbols response must not skip every symbol —
+    subscribing anyway at least surfaces per-symbol errors."""
+    c = client(["R_10", "JD10"])
+    monkeypatch.setattr(c, "send", lambda *a, **k: _resolved({"active_symbols": []}))
+    assert await c.resolve_symbols() == ["R_10", "JD10"]
+    assert c.skipped_symbols == []
+
+
+async def test_probe_request_has_no_product_type(monkeypatch):
+    """product_type='basic' returned zero rows on the live socket."""
+    seen = {}
+
+    c = client(["R_10"])
+
+    async def capture(payload, timeout=20.0):
+        seen.update(payload)
+        return ACTIVE
+
+    monkeypatch.setattr(c, "send", capture)
+    await c.resolve_symbols()
+    assert seen == {"active_symbols": "brief"}

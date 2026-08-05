@@ -36,18 +36,27 @@ class Settings(BaseSettings):
 
     @property
     def deriv_app_id_clean(self) -> str:
-        """DERIV_APP_ID as Deriv expects it: digits only.
+        """DERIV_APP_ID with shell/dashboard noise removed.
 
         Values pasted into a hosting dashboard often arrive wrapped in
         quotes or with stray whitespace ("12345", ' 12345 '), and Deriv
-        answers the handshake with the same HTTP 401 as an unregistered id
-        — so normalise before use and report what was parsed.
+        answers the handshake with the same HTTP 401 as an unknown id — so
+        normalise before use.
         """
         return self.deriv_app_id.strip().strip("\"'").strip()
 
     @property
     def deriv_app_id_valid(self) -> bool:
-        return self.deriv_app_id_clean.isdigit()
+        """Usable, not necessarily numeric.
+
+        Legacy app ids are numeric, but Deriv's current dashboard issues
+        alphanumeric identifiers, so the format is NOT constrained here —
+        only obviously broken values (empty, or containing whitespace from
+        a bad paste) are rejected. Deriv is the authority on whether an id
+        is accepted; that verdict arrives as the handshake result.
+        """
+        value = self.deriv_app_id_clean
+        return bool(value) and not any(c.isspace() for c in value)
 
     @property
     def telegram_configured(self) -> bool:

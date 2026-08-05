@@ -171,12 +171,14 @@ class DerivClient:
             except Exception as e:
                 detail = f"{type(e).__name__}: {e}"
                 if "401" in str(e) or "403" in str(e):
-                    # Deriv refuses the handshake when app_id is not a
-                    # registered application — a config error, not a blip.
+                    # Deriv refuses the handshake when it does not recognise
+                    # the app id on THIS endpoint — a config error, not a
+                    # blip. Note the legacy socket and the current dashboard
+                    # issue different identifier formats.
                     detail += (
-                        " — Deriv rejected DERIV_APP_ID. Register an application at "
-                        "api.deriv.com (Dashboard → Register application) and set its "
-                        "numeric app id."
+                        " — Deriv rejected DERIV_APP_ID for the legacy WebSocket "
+                        "endpoint. Identifiers issued by the current dashboard are "
+                        "for the newer REST/WS API and are not interchangeable here."
                     )
                 self.last_error = detail
                 log.warning("deriv ws dropped (%s); reconnecting in %ss", detail, backoff)
@@ -223,7 +225,10 @@ class DerivClient:
         a wrong one is trivially correctable.
         """
         try:
-            resp = await self.send({"active_symbols": "brief", "product_type": "basic"})
+            # Exactly the request Deriv answers with a full list. Adding
+            # `product_type: "basic"` came back with zero rows on the live
+            # socket, so it is deliberately omitted.
+            resp = await self.send({"active_symbols": "brief"})
         except Exception as e:
             log.warning("active_symbols probe failed (%s); subscribing optimistically", e)
             self.available_synthetics = []
@@ -245,10 +250,16 @@ class DerivClient:
             for r in rows
             if str(r.get("market", "")).startswith("synthetic") and code(r)
         )
-        if rows and not available:
-            log.error("active_symbols returned %d rows but no usable symbol codes: %s",
-                      len(rows), rows[0])
-            return list(self.symbols)   # never skip everything on a parsing miss
+        if not available:
+            # Empty or unparseable list: subscribing optimistically at least
+            # yields per-symbol errors. Skipping everything yields silence,
+            # and silence is what we are trying to eliminate.
+            log.error(
+                "active_symbols gave no usable codes (%d rows) — subscribing "
+                "optimistically; sample row: %s", len(rows), rows[0] if rows else None,
+            )
+            self.skipped_symbols = []
+            return list(self.symbols)
         valid = [s for s in self.symbols if s in available]
         self.skipped_symbols = [s for s in self.symbols if s not in available]
         if self.skipped_symbols:

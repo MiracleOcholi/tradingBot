@@ -150,6 +150,7 @@ class DerivPool:
             "connections_up": sum(1 for s in per if s.get("connected")),
             "streams": sum(s.get("streams", 0) for s in per),
             "subscribed": sum(s.get("subscribed", 0) for s in per),
+            "expected_streams": sum(s.get("expected_streams", 0) for s in per),
             "endpoint": first.get("endpoint"),
             "active_app_id": first.get("active_app_id"),
             "using_fallback_app_id": first.get("using_fallback_app_id"),

@@ -197,6 +197,9 @@ class DerivClient:
             "last_error": self.last_error,
             "api_errors": list(self.recent_errors),
             "subscribed": self.subscriptions_sent,
+            # streams counts every (symbol, timeframe) series held, streamed
+            # or polled — `subscribed` alone would understate coverage.
+            "expected_streams": len(self.symbols) * len(self.timeframes),
             "streamed_tfs": self.stream_timeframes,
             "polled_tfs": self.poll_timeframes,
             # Configured codes Deriv does not recognise, and the real
@@ -427,16 +430,26 @@ class DerivClient:
     async def _poll_loop(self, ws, symbols: list[str]) -> None:
         """Re-fetch the slow timeframes instead of holding a subscription
         slot for each. A closed H4/D1 candle arriving up to POLL_INTERVAL_S
-        late is immaterial to a strategy built on those closes."""
+        late is immaterial to a strategy built on those closes.
+
+        The work list is ROTATED each cycle. A cycle can be cut short — by a
+        reconnect, or by the account's request budget — and whatever sits at
+        the end is what gets dropped; without rotation that is always the
+        same pair, which is exactly how JD100's D1 stayed empty while every
+        other series filled in.
+        """
+        work = [(s, tf) for s in symbols for tf in self.poll_timeframes]
+        cycle = 0
         while True:
             await asyncio.sleep(POLL_INTERVAL_S)
-            for symbol in symbols:
-                for tf in self.poll_timeframes:
-                    try:
-                        await self._history_request(ws, symbol, tf, subscribe=False)
-                    except Exception:
-                        return  # socket gone; the session loop handles it
-                    await asyncio.sleep(SUBSCRIBE_STAGGER_S)
+            cycle += 1
+            offset = cycle % len(work) if work else 0
+            for symbol, tf in work[offset:] + work[:offset]:
+                try:
+                    await self._history_request(ws, symbol, tf, subscribe=False)
+                except Exception:
+                    return  # socket gone; the session loop handles it
+                await asyncio.sleep(SUBSCRIBE_STAGGER_S)
 
     async def _bootstrap(self, ws) -> None:
         """Authorize if we can, probe symbols, then (re)establish subscriptions."""

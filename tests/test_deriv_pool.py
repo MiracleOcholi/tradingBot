@@ -94,3 +94,21 @@ def test_tight_cap_yields_one_symbol_per_connection():
     p = pool(max_subs=2)          # 2 streamed tfs → 1 symbol per shard
     assert len(p.clients) == len(SYMBOLS)
     assert all(len(shard) == 1 for shard in p.shards)
+
+
+def test_poll_rotation_eventually_covers_every_pair():
+    """A truncated cycle must not always drop the same pair — that is how
+    one series stayed permanently empty while the rest filled in."""
+    work = [(s, tf) for s in ["A", "B", "C"] for tf in ["H4", "D1"]]
+    served_first_five = set()
+    for cycle in range(1, len(work) + 1):
+        offset = cycle % len(work)
+        rotated = work[offset:] + work[:offset]
+        served_first_five.update(rotated[:5])      # simulate a cut-short cycle
+    assert served_first_five == set(work)
+
+
+def test_expected_streams_counts_all_timeframes():
+    p = pool()
+    total = p.status()["expected_streams"]
+    assert total == len(SYMBOLS) * len(TFS)

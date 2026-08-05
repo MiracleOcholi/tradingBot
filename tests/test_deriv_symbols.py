@@ -17,12 +17,24 @@ def client(symbols):
     return DerivClient("1089", symbols, _noop)
 
 
+# Real payload shape: Deriv keys these `underlying_symbol` /
+# `underlying_symbol_name`, not `symbol` / `display_name`.
 ACTIVE = {
     "active_symbols": [
+        {"underlying_symbol": "R_10", "underlying_symbol_name": "Volatility 10 Index",
+         "market": "synthetic_index"},
+        {"underlying_symbol": "R_50", "underlying_symbol_name": "Volatility 50 Index",
+         "market": "synthetic_index"},
+        {"underlying_symbol": "JD10", "underlying_symbol_name": "Jump 10 Index",
+         "market": "synthetic_index"},
+        {"underlying_symbol": "frxEURUSD", "underlying_symbol_name": "EUR/USD",
+         "market": "forex"},
+    ]
+}
+
+LEGACY_ACTIVE = {
+    "active_symbols": [
         {"symbol": "R_10", "display_name": "Volatility 10 Index", "market": "synthetic_index"},
-        {"symbol": "R_50", "display_name": "Volatility 50 Index", "market": "synthetic_index"},
-        {"symbol": "JD10", "display_name": "Jump 10 Index", "market": "synthetic_index"},
-        {"symbol": "frxEURUSD", "display_name": "EUR/USD", "market": "forex"},
     ]
 }
 
@@ -74,3 +86,19 @@ async def test_edge_cases(monkeypatch, configured, expected):
     c = client(configured)
     monkeypatch.setattr(c, "send", lambda *a, **k: _resolved(ACTIVE))
     assert await c.resolve_symbols() == expected
+
+
+async def test_legacy_symbol_field_still_accepted(monkeypatch):
+    c = client(["R_10", "JD75"])
+    monkeypatch.setattr(c, "send", lambda *a, **k: _resolved(LEGACY_ACTIVE))
+    assert await c.resolve_symbols() == ["R_10"]
+    assert c.skipped_symbols == ["JD75"]
+
+
+async def test_unparseable_payload_never_skips_everything(monkeypatch):
+    """A field-name change must not silently mute the entire feed."""
+    c = client(["R_10", "JD10"])
+    weird = {"active_symbols": [{"instrument_code": "R_10", "market": "synthetic_index"}]}
+    monkeypatch.setattr(c, "send", lambda *a, **k: _resolved(weird))
+    assert await c.resolve_symbols() == ["R_10", "JD10"]
+    assert c.skipped_symbols == []

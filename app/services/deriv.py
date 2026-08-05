@@ -231,12 +231,24 @@ class DerivClient:
             return list(self.symbols)
 
         rows = resp.get("active_symbols", []) or []
-        available = {r.get("symbol") for r in rows}
+        # Deriv returns `underlying_symbol` / `underlying_symbol_name`;
+        # older payloads used `symbol` / `display_name`. Accept both.
+        def code(r: dict) -> str | None:
+            return r.get("underlying_symbol") or r.get("symbol")
+
+        def name(r: dict) -> str:
+            return r.get("underlying_symbol_name") or r.get("display_name") or ""
+
+        available = {code(r) for r in rows if code(r)}
         self.available_synthetics = sorted(
-            f"{r.get('symbol')} ({r.get('display_name')})"
+            f"{code(r)} ({name(r)})"
             for r in rows
-            if str(r.get("market", "")).startswith("synthetic")
+            if str(r.get("market", "")).startswith("synthetic") and code(r)
         )
+        if rows and not available:
+            log.error("active_symbols returned %d rows but no usable symbol codes: %s",
+                      len(rows), rows[0])
+            return list(self.symbols)   # never skip everything on a parsing miss
         valid = [s for s in self.symbols if s in available]
         self.skipped_symbols = [s for s in self.symbols if s not in available]
         if self.skipped_symbols:
@@ -326,6 +338,24 @@ class DerivClient:
     def unwatch_contract(self, contract_id: int) -> None:
         self._contract_ids.discard(contract_id)
 
+    @staticmethod
+    def _identify_candles(msg: dict) -> tuple[str | None, str | None]:
+        """Work out which (symbol, timeframe) a candles payload belongs to.
+
+        `passthrough` alone is not dependable — if the API stops echoing it,
+        every valid response becomes unattributable and is dropped, which
+        looks exactly like a dead feed (connected socket, zero streams).
+        The echoed request itself always carries the symbol and granularity,
+        so prefer that and keep passthrough as a fallback.
+        """
+        echo = msg.get("echo_req") or {}
+        symbol = echo.get("ticks_history")
+        tf = TF_OF_GRANULARITY.get(int(echo["granularity"])) if echo.get("granularity") else None
+        if symbol and tf:
+            return symbol, tf
+        pt = echo.get("passthrough") or {}
+        return pt.get("symbol") or symbol, pt.get("tf") or tf
+
     async def _handle(self, msg: dict) -> None:
         # Correlated request/response first (trading calls, authorize, …).
         req_id = msg.get("req_id")
@@ -368,9 +398,12 @@ class DerivClient:
             await self.on_contract(msg["proposal_open_contract"])
             return
         if msg_type == "candles":
-            pt = msg.get("echo_req", {}).get("passthrough", {})
-            symbol, tf = pt.get("symbol"), pt.get("tf")
+            symbol, tf = self._identify_candles(msg)
             if not symbol or not tf:
+                log.error(
+                    "candles response could not be attributed to a stream; "
+                    "echo_req=%s", msg.get("echo_req"),
+                )
                 return
             stream = self.streams.setdefault((symbol, tf), CandleStream(symbol, tf))
             for candle in stream.ingest_history(msg.get("candles", [])):

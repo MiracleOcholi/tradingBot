@@ -104,7 +104,9 @@ class DerivClient:
         timeframes: list[str] | None = None,
         history_count: int = 300,
         on_history_done: Callable[[str, str], Awaitable[None]] | None = None,
+        token_provider: Callable[[], Awaitable[str | None]] | None = None,
     ) -> None:
+        self.token_provider = token_provider
         self.url = f"wss://ws.derivws.com/websockets/v3?app_id={app_id}"
         self.symbols = symbols
         self.timeframes = timeframes or list(GRANULARITY)
@@ -270,8 +272,40 @@ class DerivClient:
         log.info("subscribing to %d/%d symbols", len(valid), len(self.symbols))
         return valid
 
+    async def _authorize_if_possible(self) -> None:
+        """Authorize the data socket when a token is available.
+
+        An unauthorized connection only sees the instruments the app's
+        default landing company offers — which came back EMPTY for the
+        public app id. Authorizing resolves the connection to the real
+        account, so active_symbols reflects what that account can trade.
+        """
+        if self.token_provider is None:
+            return
+        try:
+            token = await self.token_provider()
+        except Exception:
+            log.exception("token lookup failed; continuing unauthorized")
+            return
+        if not token:
+            log.info("no Deriv token stored; market socket stays unauthorized")
+            return
+        try:
+            auth = await self.authorize(token)
+            log.info("market socket authorized as %s (%s)",
+                     auth.get("loginid"), auth.get("landing_company_name"))
+        except Exception as e:
+            # Bad/expired token must not stop market data being attempted.
+            self.recent_errors.append({
+                "code": "AuthorizeFailed", "message": str(e),
+                "request": {"authorize": "<token>"},
+                "at": datetime.now(UTC).isoformat(),
+            })
+            log.error("market socket authorize failed (%s); continuing unauthorized", e)
+
     async def _bootstrap(self, ws) -> None:
-        """Probe symbols, then (re)establish every subscription."""
+        """Authorize if we can, probe symbols, then (re)establish subscriptions."""
+        await self._authorize_if_possible()
         symbols = await self.resolve_symbols()
         self.subscriptions_sent = 0
         for symbol in symbols:

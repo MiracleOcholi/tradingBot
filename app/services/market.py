@@ -114,6 +114,7 @@ class MarketService:
         self.deriv = DerivClient(
             settings.deriv_app_id_clean, self.symbols, self.on_candle,
             on_history_done=self.on_history_done,
+            token_provider=self._market_token,
         )
         if self.execution is not None:
             self.deriv.on_tick = self.execution.on_tick
@@ -173,6 +174,21 @@ class MarketService:
                 self._dirty_cursors.add(symbol)  # flushed on history-batch end
             else:
                 await self._save_cursor(symbol)
+
+    async def _market_token(self) -> str | None:
+        """A token for the data socket. Demo is preferred — market data is
+        identical on either account, so the socket takes the least
+        privileged credential available."""
+        from app.services import crypto
+
+        for name in ("deriv_token_demo", "deriv_token_live"):
+            try:
+                rows = await self.db.select("secrets", f"name=eq.{name}")
+                if rows:
+                    return crypto.decrypt(rows[0]["value_encrypted"])
+            except Exception:
+                log.exception("could not read %s", name)
+        return None
 
     async def on_history_done(self, symbol: str, tf: str) -> None:
         if symbol in self._dirty_cursors:

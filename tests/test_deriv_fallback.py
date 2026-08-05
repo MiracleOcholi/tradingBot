@@ -46,3 +46,44 @@ def test_already_using_public_id_does_not_switch():
     c = client(app_id=PUBLIC_FALLBACK_APP_ID)
     assert c._switch_to_fallback() is False
     assert c.status()["using_fallback_app_id"] is False
+
+
+async def test_auth_state_records_success(monkeypatch):
+    async def token():
+        return "tok"
+
+    c = DerivClient("1089", ["R_10"], _noop, token_provider=token)
+
+    async def ok(t):
+        return {"loginid": "CR123", "is_virtual": 0,
+                "landing_company_name": "svg", "currency": "USD"}
+
+    monkeypatch.setattr(c, "authorize", ok)
+    await c._authorize_if_possible()
+    assert c.status()["auth"] == {
+        "attempted": True, "ok": True, "loginid": "CR123",
+        "is_virtual": False, "landing_company": "svg", "currency": "USD",
+    }
+
+
+async def test_auth_state_records_failure_and_survives_error_burst(monkeypatch):
+    async def token():
+        return "bad"
+
+    c = DerivClient("1089", ["R_10"], _noop, token_provider=token)
+
+    async def boom(t):
+        raise RuntimeError("InvalidToken")
+
+    monkeypatch.setattr(c, "authorize", boom)
+    await c._authorize_if_possible()
+    for i in range(40):                       # flood the rotating buffer
+        c.recent_errors.append({"code": "InvalidSymbol", "message": str(i)})
+    auth = c.status()["auth"]
+    assert auth["ok"] is False and "InvalidToken" in auth["error"]
+
+
+async def test_auth_state_when_no_token_stored():
+    c = DerivClient("1089", ["R_10"], _noop, token_provider=None)
+    await c._authorize_if_possible()
+    assert c.status()["auth"]["attempted"] is False

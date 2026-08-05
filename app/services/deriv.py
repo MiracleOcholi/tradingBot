@@ -135,7 +135,12 @@ class DerivClient:
         self.authorized_loginid: str | None = None
         self.last_error: str | None = None
         self.connect_attempts = 0
-        self.recent_errors: deque[dict] = deque(maxlen=8)
+        self.recent_errors: deque[dict] = deque(maxlen=30)
+        # Kept out of the rotating buffer: the authorize outcome is the fact
+        # that explains an empty symbol list, and it must not be pushed out
+        # by a burst of per-symbol errors that follow it.
+        self.auth_state: dict = {"attempted": False}
+        self.symbols_probe: dict = {}
         self.subscriptions_sent = 0
         self.skipped_symbols: list[str] = []
         self.available_synthetics: list[str] = []
@@ -162,6 +167,8 @@ class DerivClient:
             # its own replacement.
             "skipped_symbols": self.skipped_symbols,
             "available_synthetics": self.available_synthetics,
+            "auth": self.auth_state,
+            "symbols_probe": self.symbols_probe,
         }
 
     def candles(
@@ -269,11 +276,16 @@ class DerivClient:
             resp = await self.send({"active_symbols": "brief"})
         except Exception as e:
             log.warning("active_symbols probe failed (%s); subscribing optimistically", e)
+            self.symbols_probe = {"error": str(e)}
             self.available_synthetics = []
             self.skipped_symbols = []
             return list(self.symbols)
 
         rows = resp.get("active_symbols", []) or []
+        self.symbols_probe = {
+            "rows": len(rows),
+            "sample": rows[0] if rows else None,
+        }
         # Deriv returns `underlying_symbol` / `underlying_symbol_name`;
         # older payloads used `symbol` / `display_name`. Accept both.
         def code(r: dict) -> str | None:
@@ -316,21 +328,33 @@ class DerivClient:
         public app id. Authorizing resolves the connection to the real
         account, so active_symbols reflects what that account can trade.
         """
+        self.auth_state = {"attempted": True}
         if self.token_provider is None:
+            self.auth_state = {"attempted": False, "reason": "no token provider"}
             return
         try:
             token = await self.token_provider()
-        except Exception:
+        except Exception as e:
+            self.auth_state = {"attempted": False, "reason": f"token lookup failed: {e}"}
             log.exception("token lookup failed; continuing unauthorized")
             return
         if not token:
+            self.auth_state = {"attempted": False, "reason": "no Deriv token stored"}
             log.info("no Deriv token stored; market socket stays unauthorized")
             return
         try:
             auth = await self.authorize(token)
+            self.auth_state = {
+                "attempted": True, "ok": True,
+                "loginid": auth.get("loginid"),
+                "is_virtual": bool(auth.get("is_virtual")),
+                "landing_company": auth.get("landing_company_name"),
+                "currency": auth.get("currency"),
+            }
             log.info("market socket authorized as %s (%s)",
                      auth.get("loginid"), auth.get("landing_company_name"))
         except Exception as e:
+            self.auth_state = {"attempted": True, "ok": False, "error": str(e)}
             # Bad/expired token must not stop market data being attempted.
             self.recent_errors.append({
                 "code": "AuthorizeFailed", "message": str(e),

@@ -126,6 +126,30 @@ class Telegram:
         })
         return res["message_id"] if res else None
 
+    # ---- webhook management ------------------------------------------------
+    async def webhook_info(self) -> dict | None:
+        """Telegram's own view of the webhook — the fastest way to explain why
+        inline buttons spin forever (no URL set, or delivery erroring)."""
+        return await self._call_raw("getWebhookInfo", {})
+
+    async def set_webhook(self, base_url: str, secret: str) -> dict | None:
+        url = base_url.rstrip("/") + "/telegram"
+        return await self._call_raw("setWebhook", {
+            "url": url,
+            "secret_token": secret,
+            "allowed_updates": ["message", "callback_query"],
+            "drop_pending_updates": False,
+        })
+
+    async def _call_raw(self, method: str, payload: dict) -> dict | None:
+        """Like _call but returns the full envelope so callers can read errors."""
+        if not self._token:
+            return None
+        r = await self._client.post(
+            f"https://api.telegram.org/bot{self._token}/{method}", json=payload
+        )
+        return r.json()
+
     async def answer_callback(self, callback_id: str, text: str = "") -> None:
         await self._call("answerCallbackQuery", {
             "callback_query_id": callback_id, **({"text": text} if text else {}),

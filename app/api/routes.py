@@ -77,12 +77,19 @@ async def get_state() -> dict[str, Any]:
     sigs = await db.select("signals", "order=created_at.desc", limit=30)
     rems = await db.select("reminders", "")
     open_trades = await db.select("trades", "status=eq.OPEN")
+    s = get_settings()
     return {
         "config": cfg,
         "signals": sigs,
         "reminders": rems,
         "open_trades": open_trades,
         "watcher": watcher.status(),
+        # Configured values live behind auth, never on public /health.
+        "env": {
+            "deriv_app_id": s.deriv_app_id_clean or None,
+            "deriv_app_id_valid": s.deriv_app_id_valid,
+            "telegram_configured": s.telegram_configured,
+        },
     }
 
 

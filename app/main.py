@@ -60,16 +60,10 @@ async def health() -> JSONResponse:
         "schema": _schema_status,
         "encryption": crypto.key_status(),
         "telegram_configured": get_settings().telegram_configured,
-        # A VALID app id is a public identifier (it travels in the client
-        # URL), so echoing it is safe and makes a mis-pasted env var
-        # obvious. Anything non-numeric is NOT an app id — it may well be a
-        # token pasted into the wrong variable — so never echo it here.
-        "deriv_app_id": (
-            get_settings().deriv_app_id_clean
-            if get_settings().deriv_app_id_valid
-            else ("<set, but not a numeric app id>"
-                  if get_settings().deriv_app_id_clean else None)
-        ),
+        # /health is unauthenticated (it is the keep-alive target), so it
+        # carries no configured values — only whether they look usable. The
+        # actual app id is served from /api/state, behind the login.
+        "deriv_app_id_set": bool(get_settings().deriv_app_id_clean),
         "deriv_app_id_valid": get_settings().deriv_app_id_valid,
         "watcher": watcher.status(),
         "env": get_settings().app_env,

@@ -109,10 +109,7 @@ class MarketService:
             log.warning("DERIV_APP_ID not set — market service idle")
             return
         if not settings.deriv_app_id_valid:
-            log.error(
-                "DERIV_APP_ID=%r is not numeric — Deriv will reject the handshake",
-                settings.deriv_app_id_clean,
-            )
+            log.error("DERIV_APP_ID looks malformed (empty or contains whitespace)")
         await self.load()
         self.deriv = DerivClient(
             settings.deriv_app_id_clean, self.symbols, self.on_candle,

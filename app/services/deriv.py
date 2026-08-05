@@ -171,12 +171,14 @@ class DerivClient:
             except Exception as e:
                 detail = f"{type(e).__name__}: {e}"
                 if "401" in str(e) or "403" in str(e):
-                    # Deriv refuses the handshake when app_id is not a
-                    # registered application — a config error, not a blip.
+                    # Deriv refuses the handshake when it does not recognise
+                    # the app id on THIS endpoint — a config error, not a
+                    # blip. Note the legacy socket and the current dashboard
+                    # issue different identifier formats.
                     detail += (
-                        " — Deriv rejected DERIV_APP_ID. Register an application at "
-                        "api.deriv.com (Dashboard → Register application) and set its "
-                        "numeric app id."
+                        " — Deriv rejected DERIV_APP_ID for the legacy WebSocket "
+                        "endpoint. Identifiers issued by the current dashboard are "
+                        "for the newer REST/WS API and are not interchangeable here."
                     )
                 self.last_error = detail
                 log.warning("deriv ws dropped (%s); reconnecting in %ss", detail, backoff)

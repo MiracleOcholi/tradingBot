@@ -23,8 +23,17 @@ def test_quotes_and_whitespace_stripped(set_app_id, raw):
     assert s.deriv_app_id_valid
 
 
-def test_non_numeric_flagged(set_app_id):
-    s = set_app_id("your_app_id_here")
+@pytest.mark.parametrize("raw", ["341ECn6ZnBXRon1hv5a4p", '"341ECn6ZnBXRon1hv5a4p"'])
+def test_alphanumeric_app_ids_are_accepted(set_app_id, raw):
+    """The current Deriv dashboard issues alphanumeric identifiers — the
+    format must not be second-guessed here."""
+    s = set_app_id(raw)
+    assert s.deriv_app_id_clean == "341ECn6ZnBXRon1hv5a4p"
+    assert s.deriv_app_id_valid is True
+
+
+def test_whitespace_inside_value_is_rejected(set_app_id):
+    s = set_app_id("12345 67890")
     assert s.deriv_app_id_valid is False
 
 

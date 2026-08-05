@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="amber" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffc466"/>
+      <stop offset="1" stop-color="#ff9f1c"/>
+    </linearGradient>
+  </defs>
+  <!-- delta-wing "M" mark -->
+  <path d="M6 52 L24 12 L32 30 L40 12 L58 52 L46 52 L38 33 L32 46 L26 33 L18 52 Z"
+        fill="url(#amber)" stroke="#ffb347" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M2 56 H62" stroke="#ffb347" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+</svg>

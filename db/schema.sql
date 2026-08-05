@@ -13,7 +13,7 @@ create table if not exists public.config (
   risk_per_trade  numeric     not null default 0.01,   -- fraction of balance risked at SL
   max_open_trades int         not null default 1,
   daily_loss_cap  numeric     not null default 0.05,   -- fraction of balance; trading halts for the day
-  watchlist       jsonb       not null default '["R_10","R_50","R_75","1HZ150V","JD10","JD75","JD100"]'::jsonb,
+  watchlist       jsonb       not null default '["R_10","R_50","R_75","JD10","JD75","JD100"]'::jsonb,
   mock_signals    boolean     not null default true,   -- Phase A: telegram mock loop enabled
   updated_at      timestamptz not null default now()
 );

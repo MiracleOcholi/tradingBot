@@ -14,7 +14,7 @@ log = logging.getLogger("maverick.signals")
 
 # Rough price scales per symbol so mock signals look plausible on the card.
 MOCK_PRICE = {
-    "R_10": 6300.0, "R_50": 220.0, "R_75": 100000.0, "1HZ150V": 1300.0,
+    "R_10": 6300.0, "R_50": 220.0, "R_75": 100000.0,
     "JD10": 9200.0, "JD75": 45000.0, "JD100": 62000.0,
 }
 

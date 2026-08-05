@@ -11,5 +11,5 @@ insert into public.reminders (name, next_due) values
 on conflict (name) do nothing;
 
 insert into public.engine_state (symbol) values
-  ('R_10'), ('R_50'), ('R_75'), ('1HZ150V'), ('JD10'), ('JD75'), ('JD100')
+  ('R_10'), ('R_50'), ('R_75'), ('JD10'), ('JD75'), ('JD100')
 on conflict (symbol) do nothing;

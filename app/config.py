@@ -3,7 +3,11 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-WATCHLIST = ["R_10", "R_50", "R_75", "1HZ150V", "JD10", "JD75", "JD100"]
+# Deriv does not list a "Volatility 150 (1s)" instrument — the 1-second
+# volatility indices it offers are 1HZ10V / 25V / 50V / 75V / 100V. The
+# methodology PDF §8.1 names Vol 150 (1s), so that symbol is unavailable
+# rather than mis-spelled; it is left out until a replacement is chosen.
+WATCHLIST = ["R_10", "R_50", "R_75", "JD10", "JD75", "JD100"]
 
 SYMBOL_LABELS = {
     "R_10": "Volatility 10",

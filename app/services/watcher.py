@@ -43,9 +43,11 @@ async def run() -> None:
     from app.execution.emulated_pending import get_execution
     _state["started_at"] = datetime.now(timezone.utc).isoformat()
     log.info("watcher started")
+    from app.services.analytics import get_tracker
     market, strategy, execution = get_market(), get_strategy(), get_execution()
     market.strategy = strategy
     market.execution = execution
+    market.analytics = get_tracker()
     strategy.market = market
     execution.market = market
     market_task = asyncio.create_task(market.run(), name="market")

@@ -105,6 +105,7 @@ create table if not exists public.virtual_orders (
   tp_price     numeric     not null,
   status       text        not null default 'ARMED' check (status in
                  ('ARMED','TRIGGERED','CANCELLED','EXPIRED')),
+  reason       text,                       -- why cancelled/expired (analytics)
   armed_at     timestamptz not null default now(),
   triggered_at timestamptz
 );

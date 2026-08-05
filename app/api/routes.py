@@ -95,6 +95,13 @@ async def set_account_mode(body: AccountMode) -> dict:
     return await get_db().update_config(patch)
 
 
+@router.get("/analytics")
+async def analytics() -> dict:
+    """Deterministic outcome stats + entry-improvement suggestions (Phase F)."""
+    from app.services import analytics as analytics_svc
+    return await analytics_svc.report()
+
+
 class SecretIn(BaseModel):
     name: str   # deriv_token_demo | deriv_token_live
     value: str

@@ -93,8 +93,12 @@ def _plan_of(sig: dict) -> TradePlan:
     )
 
 
-async def handle_action(signal_id: str, action: str) -> str:
-    """Accept / Reject / start-Edit on a pending signal. Returns toast text."""
+async def handle_action(signal_id: str, action: str, source: str = "web") -> str:
+    """Accept / Reject / start-Edit on a pending signal. Returns toast text.
+
+    `source` ('web' | 'telegram') is recorded on the decision so the audit
+    trail shows which surface the call came from.
+    """
     db, tg = get_db(), get_telegram()
     sig = await db.get_signal(signal_id)
     if not sig:
@@ -104,7 +108,7 @@ async def handle_action(signal_id: str, action: str) -> str:
 
     if action == "accept":
         sig = await db.update_signal(signal_id, {"status": "ACCEPTED", "awaiting_edit_field": None})
-        await db.record_decision(signal_id, "ACCEPT")
+        await db.record_decision(signal_id, "ACCEPT", {"source": source})
         if sig["is_mock"]:
             note = "🟢 <b>Accepted.</b> (mock signal — nothing armed)"
         else:
@@ -119,7 +123,7 @@ async def handle_action(signal_id: str, action: str) -> str:
 
     if action == "reject":
         sig = await db.update_signal(signal_id, {"status": "REJECTED", "awaiting_edit_field": None})
-        await db.record_decision(signal_id, "REJECT")
+        await db.record_decision(signal_id, "REJECT", {"source": source})
         await tg.update_signal_card(sig, "🔴 <b>Rejected.</b>", keyboard={"inline_keyboard": []})
         return "Rejected"
 

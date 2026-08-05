@@ -2,11 +2,18 @@
 
 Every request must carry X-Telegram-Bot-Api-Secret-Token matching
 TELEGRAM_WEBHOOK_SECRET (set via setWebhook secret_token).
+
+Answering order matters: Telegram keeps an inline button spinning until
+answerCallbackQuery arrives. The handler work (several Supabase round-trips
+plus a card edit) can take seconds on a cold free-tier instance, so the
+callback is acknowledged FIRST and the work runs after — the button clears
+immediately and the card edit carries the result.
 """
 from __future__ import annotations
 
 import hmac
 import logging
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
@@ -17,6 +24,18 @@ from app.services.telegram import get_telegram
 log = logging.getLogger("maverick.webhook")
 router = APIRouter()
 
+# In-memory receipt counters, surfaced via /api/telegram/status. If a button
+# is tapped and `last_update_at` does not move, Telegram never reached us.
+_stats: dict = {
+    "updates": 0, "callbacks": 0, "messages": 0,
+    "rejected_bad_secret": 0, "last_update_at": None,
+    "last_callback_data": None, "last_error": None,
+}
+
+
+def stats() -> dict:
+    return dict(_stats)
+
 
 @router.post("/telegram")
 async def telegram_webhook(
@@ -25,13 +44,19 @@ async def telegram_webhook(
 ) -> dict:
     secret = get_settings().telegram_webhook_secret
     if not secret or not hmac.compare_digest(x_telegram_bot_api_secret_token, secret):
+        _stats["rejected_bad_secret"] += 1
+        log.warning("telegram webhook rejected: secret token mismatch")
         raise HTTPException(status_code=403, detail="bad secret token")
 
     update = await request.json()
+    _stats["updates"] += 1
+    _stats["last_update_at"] = datetime.now(UTC).isoformat()
 
     if "callback_query" in update:
+        _stats["callbacks"] += 1
         await _handle_callback(update["callback_query"])
     elif "message" in update:
+        _stats["messages"] += 1
         await _handle_message(update["message"])
     return {"ok": True}
 
@@ -39,23 +64,30 @@ async def telegram_webhook(
 async def _handle_callback(cb: dict) -> None:
     tg = get_telegram()
     data = cb.get("data", "")
-    toast = ""
+    _stats["last_callback_data"] = data
+    log.info("callback received: %s", data)
+
+    # Stop the spinner before doing any work.
+    await tg.answer_callback(cb["id"])
+
     try:
         parts = data.split(":")
         if parts[0] == "sig" and len(parts) == 3:
-            toast = await signals.handle_action(parts[1], parts[2])
+            result = await signals.handle_action(parts[1], parts[2], source="telegram")
+            if result and result.startswith("Already"):
+                await tg.send_text(f"ℹ️ {result}.")
         elif parts[0] == "sig" and len(parts) == 4 and parts[2] == "edit":
-            toast = await signals.start_edit(parts[1], parts[3])
+            await signals.start_edit(parts[1], parts[3])
         elif parts[0] == "rem" and len(parts) == 3 and parts[2] == "done":
             next_due = await reminders.mark_done(parts[1])
-            toast = f"Rotation logged. Next due {next_due.isoformat()}"
             await tg.send_text(f"🔑 Rotation recorded — next due <b>{next_due.isoformat()}</b>.")
         else:
-            toast = "Unknown action"
-    except Exception:
+            await tg.send_text("Unknown action — that card may be from an older deploy.")
+        _stats["last_error"] = None
+    except Exception as e:
+        _stats["last_error"] = f"{type(e).__name__}: {e}"
         log.exception("callback handling failed: %s", data)
-        toast = "Error — check logs"
-    await tg.answer_callback(cb["id"], toast)
+        await tg.send_text(f"⚠️ Could not complete that action: {e}")
 
 
 async def _handle_message(msg: dict) -> None:

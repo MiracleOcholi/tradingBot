@@ -175,6 +175,7 @@ async def telegram_status(request: Request) -> dict:
     """Webhook health. If inline buttons spin forever, the answer is here:
     usually `url` is empty (setWebhook never ran) or last_error_message
     shows Telegram being rejected (403 = secret mismatch)."""
+    from app.api.telegram_webhook import stats as webhook_stats
     from app.services.telegram import get_telegram
 
     s = get_settings()
@@ -185,6 +186,9 @@ async def telegram_status(request: Request) -> dict:
         "configured": s.telegram_configured,
         "secret_set": bool(s.telegram_webhook_secret),
         "expected_url": expected,
+        # What actually reached this process — if a tap does not move
+        # `last_update_at`, Telegram never delivered it here.
+        "inbound": webhook_stats(),
         "webhook": {
             "url": result.get("url", ""),
             "pending_update_count": result.get("pending_update_count"),

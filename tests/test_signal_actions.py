@@ -127,3 +127,15 @@ async def test_telegram_reply_path_uses_shared_edit(env):
     assert err is None
     assert db.signals["s1"]["sl"] == 99.0
     assert db.signals["s1"]["tp"] == pytest.approx(104.0)
+
+
+async def test_decision_records_source(env):
+    db, _ = env
+    await sigsvc.handle_action("s1", "accept", source="telegram")
+    assert db.decisions[0]["payload"]["source"] == "telegram"
+
+
+async def test_decision_source_defaults_to_web(env):
+    db, _ = env
+    await sigsvc.handle_action("s1", "reject")
+    assert db.decisions[0]["payload"]["source"] == "web"

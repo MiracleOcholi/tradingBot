@@ -126,6 +126,8 @@ class DerivClient:
         self.connect_attempts = 0
         self.recent_errors: deque[dict] = deque(maxlen=8)
         self.subscriptions_sent = 0
+        self.skipped_symbols: list[str] = []
+        self.available_synthetics: list[str] = []
 
     def status(self) -> dict:
         return {
@@ -138,6 +140,11 @@ class DerivClient:
             "last_error": self.last_error,
             "api_errors": list(self.recent_errors),
             "subscribed": self.subscriptions_sent,
+            # Configured codes Deriv does not recognise, and the real
+            # synthetic-index codes it does offer — so a wrong code names
+            # its own replacement.
+            "skipped_symbols": self.skipped_symbols,
+            "available_synthetics": self.available_synthetics,
         }
 
     def candles(
@@ -183,36 +190,15 @@ class DerivClient:
             self.last_error = None
             self.authorized_loginid = None  # a new socket is unauthorized
             log.info("deriv ws connected")
+            # The reader must run before setup: the active-symbols probe is a
+            # correlated request and would deadlock waiting on a loop that
+            # had not started yet.
+            reader = asyncio.create_task(self._read_loop(ws), name="deriv-reader")
             try:
-                self.subscriptions_sent = 0
-                for symbol in self.symbols:
-                    for tf in self.timeframes:
-                        self._req_id += 1
-                        await ws.send(json.dumps({
-                            "ticks_history": symbol,
-                            "adjust_start_time": 1,
-                            "count": self.history_count,
-                            "end": "latest",
-                            "granularity": GRANULARITY[tf],
-                            "style": "candles",
-                            "subscribe": 1,
-                            "req_id": self._req_id,
-                            "passthrough": {"symbol": symbol, "tf": tf},
-                        }))
-                        self.subscriptions_sent += 1
-                        # Deriv rate-limits bursts; 28 requests fired back to
-                        # back can be rejected wholesale.
-                        await asyncio.sleep(SUBSCRIBE_STAGGER_S)
-                for symbol in list(self._tick_symbols):
-                    await ws.send(json.dumps({"ticks": symbol, "subscribe": 1}))
-                for cid in list(self._contract_ids):
-                    await ws.send(json.dumps(
-                        {"proposal_open_contract": 1, "contract_id": cid, "subscribe": 1}
-                    ))
-                async for raw in ws:
-                    self.last_message_at = datetime.now(UTC)
-                    await self._handle(json.loads(raw))
+                await self._bootstrap(ws)
+                await reader
             finally:
+                reader.cancel()
                 self.connected = False
                 self._ws = None
                 self.authorized_loginid = None
@@ -221,6 +207,74 @@ class DerivClient:
                         fut.set_exception(ConnectionError("deriv ws dropped"))
                 self._pending.clear()
                 log.info("deriv ws disconnected")
+
+    async def _read_loop(self, ws) -> None:
+        async for raw in ws:
+            self.last_message_at = datetime.now(UTC)
+            await self._handle(json.loads(raw))
+
+    async def resolve_symbols(self) -> list[str]:
+        """Ask Deriv which of the configured symbols actually exist.
+
+        Symbol codes drift (and differ by app/landing company). Subscribing
+        blindly meant one bad code produced an InvalidSymbol error that was
+        indistinguishable from a dead feed. We now check first, stream what
+        is valid, and report the rest — with the real codes Deriv offers, so
+        a wrong one is trivially correctable.
+        """
+        try:
+            resp = await self.send({"active_symbols": "brief", "product_type": "basic"})
+        except Exception as e:
+            log.warning("active_symbols probe failed (%s); subscribing optimistically", e)
+            self.available_synthetics = []
+            self.skipped_symbols = []
+            return list(self.symbols)
+
+        rows = resp.get("active_symbols", []) or []
+        available = {r.get("symbol") for r in rows}
+        self.available_synthetics = sorted(
+            f"{r.get('symbol')} ({r.get('display_name')})"
+            for r in rows
+            if str(r.get("market", "")).startswith("synthetic")
+        )
+        valid = [s for s in self.symbols if s in available]
+        self.skipped_symbols = [s for s in self.symbols if s not in available]
+        if self.skipped_symbols:
+            log.error(
+                "these configured symbols do not exist on Deriv and were skipped: %s",
+                ", ".join(self.skipped_symbols),
+            )
+        log.info("subscribing to %d/%d symbols", len(valid), len(self.symbols))
+        return valid
+
+    async def _bootstrap(self, ws) -> None:
+        """Probe symbols, then (re)establish every subscription."""
+        symbols = await self.resolve_symbols()
+        self.subscriptions_sent = 0
+        for symbol in symbols:
+            for tf in self.timeframes:
+                self._req_id += 1
+                await ws.send(json.dumps({
+                    "ticks_history": symbol,
+                    "adjust_start_time": 1,
+                    "count": self.history_count,
+                    "end": "latest",
+                    "granularity": GRANULARITY[tf],
+                    "style": "candles",
+                    "subscribe": 1,
+                    "req_id": self._req_id,
+                    "passthrough": {"symbol": symbol, "tf": tf},
+                }))
+                self.subscriptions_sent += 1
+                # Deriv rate-limits bursts; requests fired back to back can
+                # be rejected wholesale.
+                await asyncio.sleep(SUBSCRIBE_STAGGER_S)
+        for symbol in list(self._tick_symbols):
+            await ws.send(json.dumps({"ticks": symbol, "subscribe": 1}))
+        for cid in list(self._contract_ids):
+            await ws.send(json.dumps(
+                {"proposal_open_contract": 1, "contract_id": cid, "subscribe": 1}
+            ))
 
     # ------------------------------------------------------------ trading API
     async def send(self, payload: dict, timeout: float = 20.0) -> dict:

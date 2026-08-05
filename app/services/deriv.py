@@ -223,7 +223,10 @@ class DerivClient:
         a wrong one is trivially correctable.
         """
         try:
-            resp = await self.send({"active_symbols": "brief", "product_type": "basic"})
+            # Exactly the request Deriv answers with a full list. Adding
+            # `product_type: "basic"` came back with zero rows on the live
+            # socket, so it is deliberately omitted.
+            resp = await self.send({"active_symbols": "brief"})
         except Exception as e:
             log.warning("active_symbols probe failed (%s); subscribing optimistically", e)
             self.available_synthetics = []
@@ -245,10 +248,16 @@ class DerivClient:
             for r in rows
             if str(r.get("market", "")).startswith("synthetic") and code(r)
         )
-        if rows and not available:
-            log.error("active_symbols returned %d rows but no usable symbol codes: %s",
-                      len(rows), rows[0])
-            return list(self.symbols)   # never skip everything on a parsing miss
+        if not available:
+            # Empty or unparseable list: subscribing optimistically at least
+            # yields per-symbol errors. Skipping everything yields silence,
+            # and silence is what we are trying to eliminate.
+            log.error(
+                "active_symbols gave no usable codes (%d rows) — subscribing "
+                "optimistically; sample row: %s", len(rows), rows[0] if rows else None,
+            )
+            self.skipped_symbols = []
+            return list(self.symbols)
         valid = [s for s in self.symbols if s in available]
         self.skipped_symbols = [s for s in self.symbols if s not in available]
         if self.skipped_symbols:
